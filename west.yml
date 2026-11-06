@@ -1,0 +1,15 @@
+# West manifest for the IMU Tag showcase.
+# This repository is the manifest repository; the workspace top directory
+# is its parent and the SDK is cloned next to it (ncs-example-application layout).
+manifest:
+  self:
+    path: imu-tag-showcase
+  remotes:
+    - name: ncs
+      url-base: https://github.com/nrfconnect
+  projects:
+    - name: nrf
+      repo-path: sdk-nrf
+      remote: ncs
+      revision: v3.3.0
+      import: true
