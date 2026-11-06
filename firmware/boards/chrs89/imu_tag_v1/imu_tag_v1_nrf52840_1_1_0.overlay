@@ -1,0 +1,182 @@
+/*
+ * imu_tag_v1_nrf52840_1_1_0.overlay
+ *
+ * Board revision 1.1.0 — full PCBA re-layout, confirmed against the new
+ * schematic and bring-up on two physical samples. NOT just a flash-chip
+ * BOM swap as originally scoped: SPI1 (IMU), I2C0 (magnetometer), the LED,
+ * two of the six QSPI lines, and the battery-sense circuit all moved to
+ * different nRF52840 pins, and BTN1 was removed. See
+ * imu_tag_v1_nrf52840_1_1_0-pinctrl.dtsi for the full old-vs-new pin table.
+ *
+ * Bring-up history: the first flash of this overlay (flash-node-only)
+ * booted but left both the QSPI flash AND the SPI1 IMU reporting
+ * "device not ready" on real hardware — `qspi_nor: JEDEC id [00 00 00]
+ * expect [c2 28 17]` (i.e. the flash chip never responded at all, not a
+ * wrong-chip mismatch). Root cause: the 1.0.0 pinctrl states were still in
+ * effect, so the nRF52840 was toggling QSPI/SPI1 on pins that don't
+ * connect to those chips on this PCBA. This revision now carries pinctrl
+ * and peripheral-node overrides for every peripheral that actually moved.
+ *
+ * ── QSPI flash chip (BOM change, same as originally scoped) ────────────
+ * PCBA rev 1.1.0 assembles an MX25R6435F (Macronix, Ultra Low Power
+ * series) in place of the GD25Q64ESIG (GigaDevice) used on 1.0.0 — same
+ * footprint, same pinout, same 64 Mbit / 8 MB QSPI NOR class. It is NOT
+ * a drop-in devicetree swap: nrf_qspi_nor_init() (drivers/flash/
+ * nrf_qspi_nor.c) reads the flash's live JEDEC ID at boot and returns
+ * -ENODEV on mismatch, so `jedec-id` must match whichever chip is
+ * actually assembled. Deep Power-Down timing also differs per datasheet.
+ *
+ * The 1.0.0 node (&gd25q64 in imu_tag_v1_nrf52840.dts) is deleted and
+ * replaced wholesale rather than patched in place, so the devicetree for
+ * this revision reads correctly as MX25R6435F end to end (name, label,
+ * jedec-id, timing) instead of carrying a mismatched GD25Q64ESIG name
+ * with patched-in Macronix values.
+ *
+ * `jedec-id` and `sfdp-bfp` below are taken verbatim from Nordic's own
+ * nrf52840dk_nrf52840.dts, which assembles this exact chip — not
+ * re-derived from the datasheet by hand.
+ */
+
+#include "imu_tag_v1_nrf52840_1_1_0-pinctrl.dtsi"
+
+/delete-node/ &gd25q64;
+
+&qspi {
+	pinctrl-0 = <&qspi_default_r110>;
+	pinctrl-1 = <&qspi_sleep_r110>;
+	pinctrl-names = "default", "sleep";
+
+	mx25r64: mx25r6435f@0 {
+		compatible = "nordic,qspi-nor";
+		reg = <0>;
+		sck-frequency = <8000000>;
+
+		/* JEDEC ID: C2h=Macronix  28h=MX25R  17h=64Mbit */
+		jedec-id = [c2 28 17];
+
+		sfdp-bfp = [
+			e5 20 f1 ff  ff ff ff 03  44 eb 08 6b  08 3b 04 bb
+			ee ff ff ff  ff ff 00 ff  ff ff 00 ff  0c 20 0f 52
+			10 d8 00 ff  23 72 f5 00  82 ed 04 cc  44 83 68 44
+			30 b0 30 b0  f7 c4 d5 5c  00 be 29 ff  f0 d0 ff ff
+		];
+
+		size = <67108864>;    /* 64 Mbit in bits */
+		has-dpd;
+		/* MX25R6435F datasheet — differs from GD25Q64ESIG's 3 us / 30 us
+		 * (see the 1.0.0 node this replaces). */
+		t-enter-dpd = <10000>;  /* 10 us */
+		t-exit-dpd  = <35000>;  /* 35 us */
+
+		/* Identical layout to the 1.0.0 node — same `log_partition`
+		 * label so flog/CONFIG_FLOG_PARTITION_LABEL resolve unchanged
+		 * regardless of which board revision is selected. */
+		partitions {
+			compatible = "fixed-partitions";
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			log_partition: partition@0 {
+				label = "log_partition";
+				reg = <0x000000 0x800000>;  /* 8 MB — full QSPI NOR */
+			};
+		};
+	};
+};
+
+/ {
+	chosen {
+		/* Re-point Nordic PM's "external_flash" region at the new node —
+		 * &gd25q64 no longer exists on this revision. */
+		nordic,pm-ext-flash = &mx25r64;
+	};
+};
+
+/* ── SPI1 — LSM6DSV16X IMU (SCK=P0.02, MOSI=P0.29, MISO=P0.31, CS=P0.05) ──
+ * All three bus pins and the GPIO chip-select moved; see the -pinctrl.dtsi
+ * header comment for the full old-vs-new table. */
+&spi1 {
+	pinctrl-0 = <&spi1_default_r110>;
+	pinctrl-1 = <&spi1_sleep_r110>;
+	cs-gpios = <&gpio0 5 GPIO_ACTIVE_LOW>;   /* P0.05 — was P0.03 on 1.0.0 */
+};
+
+/* INT1 (FIFO watermark/DRDY) moves to P0.30 (was P1.00). INT2 stays P0.08
+ * — unchanged, so no override needed for it — but is now additionally
+ * dual-bonded to P1.09 on this PCB (per schematic); P1.09 is deliberately
+ * left unclaimed by any pinctrl/peripheral node here. It's the System-OFF
+ * SENSE wake pin, handled directly in src/events/event_triggers.c
+ * (s_int2_alt = raw &gpio1 pin 9, independent of devicetree) — do not
+ * assign P1.09 to anything else on this revision, or the System-OFF wake
+ * path will conflict with whatever else drives it. */
+&lsm6dsv16x {
+	int1-gpios = <&gpio0 30 GPIO_ACTIVE_HIGH>;   /* P0.30 — was P1.00 */
+};
+
+/* ── I2C0 — LIS2MDL magnetometer (SDA=P0.07, SCL=P0.12) ─────────────────── */
+&i2c0 {
+	pinctrl-0 = <&i2c0_default_r110>;
+	pinctrl-1 = <&i2c0_sleep_r110>;
+};
+
+/* ── PWM0 — status LED (OUT0=P1.13, was P0.07) ──────────────────────────── */
+&pwm0 {
+	pinctrl-0 = <&pwm0_default_r110>;
+	pinctrl-1 = <&pwm0_sleep_r110>;
+};
+
+/*
+ * ── Battery sense — moved from AIN2/P0.04 to AIN1/P0.03, and now
+ * GPIO-gated for power savings (new on this revision; 1.0.0's divider was
+ * always-on).
+ *
+ * VCC --R2(820K)-- BATTERY_PIN(AIN1/P0.03) --R3(2M)-- GPIO_BAT_MEAS(P0.28)
+ * C1 (10 nF) from BATTERY_PIN to GND.
+ *
+ * Design intent (confirmed with hardware): GPIO_BAT_MEAS sits high-
+ * impedance (GPIO_INPUT, floating) whenever a reading isn't in progress,
+ * so the R2/R3 chain has no closed path to ground and draws ~0 quiescent
+ * current during deep sleep. Only while actively sampling does firmware
+ * drive it low (GPIO_OUTPUT, active-low), completing the divider so
+ * BATTERY_PIN reads VBAT x R3/(R2+R3) ~= 0.7092 x VBAT — see
+ * src/status/battery_monitor.c, which already had the correct 820K/2M
+ * scaling constant (DIVIDER_NUM/DIVIDER_DEN) but not yet the GPIO
+ * sequencing this revision requires; that's added alongside this overlay.
+ *
+ * R2 ‖ R3 ≈ 581.6 KΩ — essentially identical to 1.0.0's ≈581 KΩ, so the
+ * existing ADC_GAIN_1_6 / ADC_REF_INTERNAL / 40 us acquisition-time
+ * settings (sized for that Thevenin impedance) carry over unchanged.
+ */
+&adc {
+	channel@1 {
+		reg = <1>;
+		zephyr,gain = "ADC_GAIN_1_6";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 40)>;
+		zephyr,input-positive = <NRF_SAADC_AIN1>;
+		zephyr,resolution = <12>;
+	};
+};
+
+&{/zephyr,user} {
+	io-channels = <&adc 1>;   /* was <&adc 2> on 1.0.0 */
+	/* Idle state (GPIO_INPUT/Hi-Z) is established once in
+	 * battery_monitor_init(); battery_work_fn() drives it low only for
+	 * the duration of each sample. Absent entirely on 1.0.0 builds —
+	 * battery_monitor.c uses GPIO_DT_SPEC_GET_OR() so the same source
+	 * compiles for both revisions. */
+	bat-meas-gpios = <&gpio0 28 GPIO_ACTIVE_LOW>;
+};
+
+/*
+ * ── BTN1 removed on this revision — its old pin (P0.05) is now SPI1_CS.
+ * No firmware references &button0/DT_ALIAS(sw0) today, so this is a pure
+ * devicetree cleanup: dropping the alias avoids leaving a phandle to a
+ * node that's about to be deleted, and dropping the node avoids
+ * describing hardware that no longer exists on this PCBA.
+ */
+&{/aliases} {
+	/delete-property/ sw0;
+};
+
+/delete-node/ &button0;

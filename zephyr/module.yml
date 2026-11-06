@@ -1,0 +1,6 @@
+# Makes this repository a Zephyr module so every image of the sysbuild
+# (application and MCUboot) finds the custom board and the DTS bindings.
+build:
+  settings:
+    board_root: firmware
+    dts_root: firmware

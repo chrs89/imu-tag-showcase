@@ -1,0 +1,18 @@
+identifier: imu_tag_v1
+name: IMU Tag v1 (E73-2G4M08S1C / nRF52840)
+type: mcu
+arch: arm
+toolchain:
+  - zephyr
+  - gnuarmemb
+ram: 256
+flash: 1024
+supported:
+  - ble
+  - spi
+  - i2c
+  - qspi
+  - uart
+  - gpio
+  - counter
+  - watchdog

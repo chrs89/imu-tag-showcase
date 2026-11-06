@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: Apache-2.0
+
+# HWMv2 board-level Kconfig for IMU Tag v1.
+# Selects the package-specific SoC Kconfig (SOC_NRF52840_QIAA), which in turn
+# selects SOC_NRF52840 → SOC_SERIES_NRF52X → HAS_NRFX and all NRFX dependencies.
+# Without this file the NRFX dependency chain is broken and MCUboot Kconfig aborts.
+
+config BOARD_IMU_TAG_V1
+	select SOC_NRF52840_QIAA if BOARD_IMU_TAG_V1_NRF52840

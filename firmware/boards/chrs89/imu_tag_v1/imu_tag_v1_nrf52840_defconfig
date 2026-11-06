@@ -1,0 +1,25 @@
+# IMU Tag v1 board defaults — E73-2G4M08S1C (nRF52840)
+# SOC_SERIES / SOC_NRF52840 / HAS_NRFX are set by Kconfig.imu_tag_v1 via HWMv2.
+# Keep this file minimal so it is valid for ALL images (MCUboot, app, etc.).
+
+# Cortex-M4 MPU
+CONFIG_ARM_MPU=y
+
+# GPIO (LEDs, buttons, CS pins)
+CONFIG_GPIO=y
+
+#
+# NFC-pin UICR provisioning is not assigned here because this defconfig is
+# consumed by all sysbuild images, including MCUboot where NFCT_PINS_AS_GPIOS
+# may be unavailable.
+#
+
+#
+# Reset-pin UICR provisioning is not assigned here because GPIO_AS_PINRESET is
+# not directly user-configurable in Zephyr 4.3/NCS v3.3.0.
+#
+
+# SERIAL / UART driver is not needed on this board (UART pins are unrouted).
+# Console and shell are routed through Segger RTT — see prj.conf.
+CONFIG_SERIAL=n
+CONFIG_UART_CONSOLE=n

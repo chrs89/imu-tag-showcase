@@ -1,0 +1,2 @@
+config BOARD_IMU_TAG_V1
+	bool "IMU Tag v1 — E73-2G4M08S1C (nRF52840) custom PCB"

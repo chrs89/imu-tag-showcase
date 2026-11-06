@@ -1,0 +1,363 @@
+/*
+ * Board DTS — IMU Tag v1
+ * Module : E73-2G4M08S1C (nRF52840QIAA)
+ * Flash  : GD25Q64ESIG  (64 Mbit / 8 MB, QSPI) — PCBA rev 1.0.0 (default).
+ *          Rev 1.1.0 assembles an MX25R6435F instead; see
+ *          imu_tag_v1_nrf52840_1_1_0.overlay and board.yml's `revision:`
+ *          block. Build with `west build -b imu_tag_v1@1.1.0/nrf52840`.
+ * IMU    : LSM6DSV16X   (SPI1)
+ * Mag    : LIS2MDL      (I2C0)
+ */
+
+/dts-v1/;
+#include <nordic/nrf52840_qiaa.dtsi>
+#include "imu_tag_v1_nrf52840-pinctrl.dtsi"
+#include <zephyr/dt-bindings/input/input-event-codes.h>
+#include <zephyr/dt-bindings/pwm/pwm.h>
+#include <zephyr/dt-bindings/adc/nrf-saadc.h>
+#include <zephyr/dt-bindings/regulator/nrf5x.h>
+
+/ {
+	model = "IMU Tag v1";
+	compatible = "chrs89,imu-tag-v1";
+
+	chosen {
+		/*
+		 * UART0 (P0.28/P0.29) is not accessible on the PCB — console and
+		 * shell are routed through Segger RTT (CONFIG_RTT_CONSOLE +
+		 * CONFIG_SHELL_BACKEND_RTT in prj.conf).
+		 * The zephyr,console / zephyr,shell-uart chosen nodes are left
+		 * unset so the build does not force UART initialisation.
+		 */
+		zephyr,sram           = &sram0;
+		zephyr,flash          = &flash0;
+		zephyr,flash-controller = &flash_controller;
+		zephyr,code-partition = &slot0_partition;
+		/* Map Nordic PM "external_flash" region to the QSPI NOR.
+		 * Re-pointed at &mx25r64 on PCBA rev 1.1.0 — see
+		 * imu_tag_v1_nrf52840_1_1_0.overlay. */
+		nordic,pm-ext-flash   = &gd25q64;
+	};
+
+	/*
+	 * Status LED driven via PWM0 ch.0 (P0.07 → R5 1K → D2 → GND, active HIGH)
+	 * instead of plain gpio-leds — gives brightness control for smooth
+	 * fade/breathe patterns (e.g. the BLE-connect indicator), not just on/off.
+	 */
+	pwmleds: pwmleds {
+		compatible = "pwm-leds";
+		led0_pwm: led_pwm_0 {
+			pwms = <&pwm0 0 PWM_MSEC(20) PWM_POLARITY_NORMAL>;
+			label = "Status LED";
+		};
+	};
+
+	/*
+	 * Battery voltage sense — VBAT → R2 (820 KΩ) → BATTERY_PIN (AIN2/P0.04)
+	 * → R3 (2 MΩ) → GND. SAADC channel 2 samples the divided-down voltage;
+	 * battery_monitor applies the divider ratio (R3/(R2+R3) ≈ 0.70922) to
+	 * recover actual VBAT. Declared via zephyr,user/io-channels so the
+	 * driver can fetch the adc_dt_spec straight from devicetree.
+	 */
+	zephyr,user {
+		io-channels = <&adc 2>;
+	};
+
+	buttons {
+		compatible = "gpio-keys";
+		button0: button_0 {
+			/* P0.05 — BTN1 */
+			gpios = <&gpio0 5 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+			label = "Button 1";
+			zephyr,code = <INPUT_KEY_0>;
+		};
+	};
+
+	aliases {
+		led0         = &led0_pwm;
+		sw0          = &button0;
+		imu0         = &lsm6dsv16x;
+		stream0      = &lsm6dsv16x;
+		mag-sensor0  = &lis2mdl;
+	};
+};
+
+/*
+ * UART0 disabled: P0.28 (TX) / P0.29 (RX) are not wired on the PCB.
+ * Having the driver active causes the RX pin to float and may produce
+ * spurious UART framing errors.
+ */
+&uart0 { status = "disabled"; };
+
+/*
+ * REG1 (main core regulator) — DC/DC mode instead of LDO.
+ *
+ * Confirmed against the schematic: DCC -> 10 uH inductor -> VDD, with DEC4
+ * and DEC6 tied together and commonly decoupled — the standard Nordic
+ * reference wiring for REG1 DC/DC mode (LDO mode instead uses separate,
+ * individual decoupling on those pins). REG0 (the separate HV stage, VDDH/
+ * DCCH/DECUSB) shows no inductor in the schematic and is left untouched —
+ * this override is REG1 only.
+ *
+ * Hardware automatically falls back to LDO at very low load currents
+ * regardless of this setting, so it costs nothing during System OFF /
+ * deep-idle and only engages during higher-current periods (BLE radio
+ * active, SPI1/QSPI bursts, CPU-active processing).
+ *
+ * TEMPORARY DIAGNOSTIC OVERRIDE (revert before merging): forced to LDO to
+ * bench-test whether REG1's DC/DC burst/refresh behavior is the source of
+ * the periodic ~500 uA / ~7 s current spikes measured in System OFF with
+ * the debug probe disconnected (RESET hard-tied to VCC, so it isn't a
+ * reset loop; no CPU/firmware activity can explain it either — a regulator-
+ * level effect is the remaining candidate). If the doc comment above is
+ * accurate and DC/DC already auto-falls-back to LDO at this load, this
+ * change should measure as NO difference — which is itself the answer:
+ * it would rule out REG1 entirely and point back at REG0, the LIS2MDL
+ * (confirmed never powered down before System OFF — separate finding), or
+ * something else. Revert to NRF5X_REG_MODE_DCDC once this test is done.
+ */
+&reg1 {
+	regulator-initial-mode = <NRF5X_REG_MODE_LDO>;
+};
+
+/* ── I2C0 — LIS2MDL magnetometer (SDA=P1.04, SCL=P1.06) ─────────────────── */
+&i2c0 {
+	compatible = "nordic,nrf-twim";
+	status = "okay";
+	pinctrl-0 = <&i2c0_default>;
+	pinctrl-1 = <&i2c0_sleep>;
+	pinctrl-names = "default", "sleep";
+	clock-frequency = <I2C_BITRATE_FAST>;
+	/* twim_nrfx doesn't call pm_device_runtime_enable() itself — opt it in
+	 * explicitly here rather than via the blanket CONFIG_PM_DEVICE_RUNTIME_
+	 * DEFAULT_ENABLE, which also silently catches &gpio0/&gpio1 and breaks
+	 * INT2 edge-interrupt delivery (see prj.conf comment). */
+	zephyr,pm-device-runtime-auto;
+
+	lis2mdl: lis2mdl@1e {
+		compatible = "st,lis2mdl";
+		reg = <0x1e>;
+		status = "okay";
+	};
+};
+
+/* Disable unused buses */
+&i2c1   { status = "disabled"; };
+&spi0   { status = "disabled"; };
+
+/*
+ * SPI1 — LSM6DSV16X IMU (CS=P0.03, INT1=P1.00, INT2=P0.08)
+ *
+ * P0.03 is an ordinary GPIO — no NFC association. The nRF52840's actual NFC
+ * antenna pins are P0.09/P0.10 (NFC1/NFC2), neither of which is used by this
+ * board for SPI1 or anything else; no UICR pin-mode override is needed for
+ * P0.03 (or for P0.09/P0.10) since none of them are NFC-muxed pins that
+ * require releasing. See the &nfct node below (Milestone 3) for the NFC
+ * antenna itself.
+ */
+&spi1 {
+	compatible = "nordic,nrf-spim";
+	status = "okay";
+	pinctrl-0 = <&spi1_default>;
+	pinctrl-1 = <&spi1_sleep>;
+	pinctrl-names = "default", "sleep";
+	cs-gpios = <&gpio0 3 GPIO_ACTIVE_LOW>;   /* P0.03 */
+	/*
+	 * Deliberately NOT opted into pm-device-runtime-auto, unlike I2C0/QSPI/
+	 * PWM0 above/below -- SPI1 exclusively serves the LSM6DSV16X IMU, whose
+	 * FIFO runs continuously at 240 Hz from boot until System OFF. There is
+	 * no idle window for this bus to legitimately save power in: it's
+	 * needed again within ~33ms of any idle moment. Confirmed on-device as
+	 * the root cause of a 'burst_proc' watchdog reboot loop -- letting SPI1
+	 * auto-suspend during extended idle (e.g. while classified
+	 * DEEP_SLEEP_ELIGIBLE, unconnected) stalled burst_processor_thread's
+	 * next FIFO read on resume, starving the watchdog every ~66s. Same
+	 * root-cause class as the &gpio0/&gpio1 exclusion documented in
+	 * prj.conf's PM_DEVICE_RUNTIME_DEFAULT_ENABLE comment (PM_DEVICE_RUNTIME
+	 * silently breaking an interrupt/bus-dependent path) -- found via the
+	 * same kind of on-device evidence, just a different peripheral.
+	 */
+
+	lsm6dsv16x: lsm6dsv16x@0 {
+		compatible = "st,lsm6dsv16x";
+		reg = <0>;
+		status = "okay";
+
+		spi-max-frequency = <8000000>;
+		spi-cpol;
+		spi-cpha;   /* SPI mode 3 */
+
+		int1-gpios = <&gpio1 0 GPIO_ACTIVE_HIGH>;   /* P1.00 */
+		int2-gpios = <&gpio0 8 GPIO_ACTIVE_HIGH>;   /* P0.08 */
+		/*
+		 * drdy-pin = <1>: route DRDY to INT1 (P1.00).
+		 * INT1 carries the FIFO-watermark interrupt used by imu_driver_fifo.
+		 * INT2 (P0.08) is reserved for the event_triggers module
+		 * (tap / double-tap / free-fall / motion detection).
+		 * trig_02 bypasses the Zephyr trigger subsystem entirely and
+		 * configures FIFO routing via direct ST HAL register writes.
+		 */
+		drdy-pin = <1>;
+
+		/*
+		 * Boot-time default only — changeable at runtime via
+		 * imu_driver_fifo_set_odr() (SET_PIPELINE_CONFIG's odr field).
+		 * Register value 7 = 240 Hz per the LSM6DSV16X_ODR_AT_240Hz enum in
+		 * lsm6dsv16x_reg.h, NOT 104 Hz — confirmed on-device via
+		 * `trig dsp selftest` (1.875 Hz bin resolution x 128-sample window
+		 * = 240 Hz). A previous version of this comment claimed 104 Hz;
+		 * that was wrong and led to incorrect frequency-resolution/window-
+		 * duration math in the mobile app before GET_DSP_STATUS started
+		 * reporting the real negotiated rate.
+		 */
+		accel-odr              = <7>;   /* 240 Hz */
+		accel-range            = <2>;   /* ±8 g   */
+		gyro-odr               = <7>;   /* 240 Hz */
+		gyro-range             = <4>;   /* ±2000 dps */
+		drdy-pulsed;
+	};
+};
+
+/* ── QSPI — GD25Q64ESIG 8 MB NOR flash (PCBA rev 1.0.0 — default) ────────
+ * Rev 1.1.0 deletes &gd25q64 and redeclares it as MX25R6435F; see
+ * imu_tag_v1_nrf52840_1_1_0.overlay. ─────────────────────────────────── */
+&qspi {
+	status = "okay";
+	pinctrl-0 = <&qspi_default>;
+	pinctrl-1 = <&qspi_sleep>;
+	pinctrl-names = "default", "sleep";
+	/* See &i2c0 above — same reasoning, nrf_qspi_nor doesn't self-enable. */
+	zephyr,pm-device-runtime-auto;
+
+	gd25q64: gd25q64esig@0 {
+		compatible = "nordic,qspi-nor";
+		reg = <0>;
+		sck-frequency = <8000000>;
+
+		/* JEDEC ID: C8h=GigaDevice  40h=GD25Q  17h=64Mbit */
+		jedec-id = [c8 40 17];
+
+		sfdp-bfp = [
+			e5 20 f1 ff  ff ff ff 03  44 eb 08 6b  08 3b 04 bb
+			ee ff ff ff  ff ff 00 ff  ff ff 00 ff  0c 20 0f 52
+			10 d8 00 ff  23 72 f5 00  82 ed 04 cc  44 83 68 44
+			30 b0 30 b0  f7 c4 d5 5c  00 be 29 ff  f0 d0 ff ff
+		];
+
+		size = <67108864>;    /* 64 Mbit in bits */
+		has-dpd;
+		t-enter-dpd = <3000>;   /* 3 µs */
+		t-exit-dpd  = <30000>;  /* 30 µs */
+
+		/*
+		 * The entire 8 MB QSPI NOR flash is used as the IMU session
+		 * log area (flog / alog backend).
+		 * At 240 Hz, 28 B/sample: ~27 KB/s → ~46 minutes per full flash.
+		 *
+		 * This partition is intentionally separate from the internal
+		 * flash storage_partition (used by Zephyr settings / NVS).
+		 */
+		partitions {
+			compatible = "fixed-partitions";
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			log_partition: partition@0 {
+				label = "log_partition";
+				reg = <0x000000 0x800000>;  /* 8 MB — full QSPI NOR */
+			};
+		};
+	};
+};
+
+/* ── GPIO ────────────────────────────────────────────────────────────────── */
+&gpiote { status = "okay"; };
+&gpio0  { status = "okay"; };
+&gpio1  { status = "okay"; };
+
+/* ── PWM0 — status LED brightness control (OUT0 → P0.07) ──────────────────── */
+&pwm0 {
+	status = "okay";
+	pinctrl-0 = <&pwm0_default>;
+	pinctrl-1 = <&pwm0_sleep>;
+	pinctrl-names = "default", "sleep";
+	/* See &i2c0 above — pwm_nrfx/led_pwm don't self-enable either; this is
+	 * what makes led_indicator.c's explicit pm_device_runtime_get/put calls
+	 * actually take effect instead of being silent no-ops. */
+	zephyr,pm-device-runtime-auto;
+};
+
+/*
+ * ── SAADC — battery voltage sense (AIN2 → P0.04, BATTERY_PIN) ──────────────
+ * Single-ended, internal 0.6 V reference with 1/6 gain → 3.6 V full scale,
+ * comfortably covering the divided-down VBAT range (CR2032 fresh ≈ 3.0 V
+ * → ≈ 2.13 V at the tap). The divider's Thevenin source impedance
+ * (R2 ‖ R3 ≈ 581 KΩ) is high, so the longest available acquisition time
+ * (40 µs) is used to let the sample-and-hold capacitor settle fully.
+ */
+&adc {
+	status = "okay";
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	channel@2 {
+		reg = <2>;
+		zephyr,gain = "ADC_GAIN_1_6";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 40)>;
+		zephyr,input-positive = <NRF_SAADC_AIN2>;
+		zephyr,resolution = <12>;
+	};
+};
+
+/*
+ * NFCT — Milestone 3 (NFC wake + LE SC OOB pairing over NFC).
+ *
+ * The antenna is populated on PCBA rev 1.1.0. Enabled here in the shared
+ * base DTS (not a revision-specific overlay) rather than only on 1.1.0,
+ * because P0.09/P0.10 (NFC1/NFC2) are unclaimed by anything on either
+ * revision — no UICR pin-mode override is needed (CONFIG_NFCT_PINS_AS_GPIOS
+ * is not set anywhere in this build, so the pins are already left in their
+ * default NFC mode at the UICR level). Enabling &nfct on a 1.0.0 board with
+ * no antenna populated is harmless: NFCT simply never senses a field, the
+ * same way e.g. battery_monitor.c's GPIO_DT_SPEC_GET_OR() pattern compiles
+ * unchanged for hardware variants where the corresponding component is
+ * absent.
+ *
+ * P0.03 is SPI1's CS (see &spi1 above); P0.02 is unused. Neither has any
+ * NFC association.
+ */
+&nfct   { status = "okay"; };
+
+/* ── Internal flash partitions (MCUboot + two OTA slots) ─────────────────── */
+&flash0 {
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		/* MCUboot bootloader */
+		boot_partition: partition@0 {
+			label = "mcuboot";
+			reg = <0x00000000 0x0000C000>;  /* 48 KB */
+		};
+
+		/* Primary application image */
+		slot0_partition: partition@c000 {
+			label = "image-0";
+			reg = <0x0000C000 0x00076000>;  /* 472 KB */
+		};
+
+		/* Secondary (OTA) image */
+		slot1_partition: partition@82000 {
+			label = "image-1";
+			reg = <0x00082000 0x00076000>;  /* 472 KB */
+		};
+
+		/* NVS / settings storage */
+		storage_partition: partition@f8000 {
+			label = "storage";
+			reg = <0x000F8000 0x00008000>;  /* 32 KB */
+		};
+	};
+};

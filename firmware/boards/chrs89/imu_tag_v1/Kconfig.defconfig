@@ -1,0 +1,6 @@
+if BOARD_IMU_TAG_V1
+
+config BOARD
+	default "imu_tag_v1"
+
+endif

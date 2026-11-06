@@ -1,0 +1,106 @@
+/*
+ * imu_tag_v1_nrf52840_1_1_0-pinctrl.dtsi
+ *
+ * Pin control definitions for PCBA revision 1.1.0 — confirmed against the
+ * new schematic (E73-2G4M08S1C module pin table cross-referenced against
+ * Ebyte's datasheet). This is a near-total re-route, not just the flash
+ * chip's footprint — see imu_tag_v1_nrf52840_1_1_0.overlay for the full
+ * revision-1.1.0 change set (this file only defines new pinctrl *states*;
+ * the overlay re-points each peripheral node at them).
+ *
+ * Pin map, revision 1.1.0 (vs. 1.0.0 in imu_tag_v1_nrf52840-pinctrl.dtsi):
+ *   SPI1  : SCK=P0.02  MOSI=P0.29  MISO=P0.31  CS(GPIO)=P0.05   [was P1.10/P1.11/P1.13/P0.03]
+ *   I2C0  : SDA=P0.07  SCL=P0.12                                [was P1.04/P1.06]
+ *   QSPI  : SCK=P0.13  IO0=P0.24   IO1=P0.20   IO2=P0.22  IO3=P0.17  CSN=P0.15
+ *           (IO0/IO3 swapped vs. 1.0.0; SCK/IO1/IO2/CSN unchanged)
+ *   PWM0  : OUT0=P1.13 (status LED)                             [was P0.07]
+ *
+ * LSM6DSV16X INT1 moves to P0.30 (was P1.00) — see &lsm6dsv16x override in
+ * the overlay, not pinctrl (interrupt GPIOs aren't pin-muxed states).
+ * INT2 stays P0.08, additionally dual-bonded to P1.09 on this PCB — P1.09
+ * is deliberately NOT claimed by anything here; it's the System-OFF
+ * SENSE wake pin handled directly in src/events/event_triggers.c
+ * (s_int2_alt), independent of devicetree/pinctrl.
+ *
+ * Battery sense moves from AIN2/P0.04 to AIN1/P0.03, and adds a new
+ * GPIO-gated divider enable (GPIO_BAT_MEAS/P0.28) — handled via the ADC
+ * channel + zephyr,user overrides in the overlay, not pinctrl (SAADC
+ * analog inputs and plain GPIO aren't pin-muxed either).
+ *
+ * BTN1 (P0.05 on 1.0.0) is removed on this revision — the pin is now
+ * SPI1_CS. The `buttons`/`sw0` alias nodes are deleted for this revision
+ * in the overlay.
+ */
+
+#include <dt-bindings/pinctrl/nrf-pinctrl.h>
+
+&pinctrl {
+
+	/* ── I2C0  — LIS2MDL magnetometer (SDA=P0.07, SCL=P0.12) ───────────── */
+	i2c0_default_r110: i2c0_default_r110 {
+		group1 {
+			psels = <NRF_PSEL(TWIM_SDA, 0, 7)>,    /* P0.07 */
+			        <NRF_PSEL(TWIM_SCL, 0, 12)>;   /* P0.12 */
+		};
+	};
+	i2c0_sleep_r110: i2c0_sleep_r110 {
+		group1 {
+			psels = <NRF_PSEL(TWIM_SDA, 0, 7)>,
+			        <NRF_PSEL(TWIM_SCL, 0, 12)>;
+			low-power-enable;
+		};
+	};
+
+	/* ── PWM0  — status LED brightness control (OUT0=P1.13) ────────────── */
+	pwm0_default_r110: pwm0_default_r110 {
+		group1 {
+			psels = <NRF_PSEL(PWM_OUT0, 1, 13)>;   /* P1.13 */
+		};
+	};
+	pwm0_sleep_r110: pwm0_sleep_r110 {
+		group1 {
+			psels = <NRF_PSEL(PWM_OUT0, 1, 13)>;
+			low-power-enable;
+		};
+	};
+
+	/* ── SPI1  — LSM6DSV16X IMU (SCK=P0.02, MOSI=P0.29, MISO=P0.31) ───── */
+	spi1_default_r110: spi1_default_r110 {
+		group1 {
+			psels = <NRF_PSEL(SPIM_SCK,  0, 2)>,   /* P0.02 */
+			        <NRF_PSEL(SPIM_MOSI, 0, 29)>,  /* P0.29 */
+			        <NRF_PSEL(SPIM_MISO, 0, 31)>;  /* P0.31 */
+		};
+	};
+	spi1_sleep_r110: spi1_sleep_r110 {
+		group1 {
+			psels = <NRF_PSEL(SPIM_SCK,  0, 2)>,
+			        <NRF_PSEL(SPIM_MOSI, 0, 29)>,
+			        <NRF_PSEL(SPIM_MISO, 0, 31)>;
+			low-power-enable;
+		};
+	};
+
+	/* ── QSPI  — MX25R6435F NOR flash. IO0/IO3 swapped vs. 1.0.0. ──────── */
+	qspi_default_r110: qspi_default_r110 {
+		group1 {
+			psels = <NRF_PSEL(QSPI_SCK, 0, 13)>,   /* P0.13 — unchanged */
+			        <NRF_PSEL(QSPI_IO0, 0, 24)>,    /* P0.24 — was IO3 on 1.0.0 */
+			        <NRF_PSEL(QSPI_IO1, 0, 20)>,    /* P0.20 — unchanged */
+			        <NRF_PSEL(QSPI_IO2, 0, 22)>,    /* P0.22 — unchanged */
+			        <NRF_PSEL(QSPI_IO3, 0, 17)>,    /* P0.17 — was IO0 on 1.0.0 */
+			        <NRF_PSEL(QSPI_CSN, 0, 15)>;    /* P0.15 — unchanged */
+		};
+	};
+	qspi_sleep_r110: qspi_sleep_r110 {
+		group1 {
+			psels = <NRF_PSEL(QSPI_SCK, 0, 13)>,
+			        <NRF_PSEL(QSPI_IO0, 0, 24)>,
+			        <NRF_PSEL(QSPI_IO1, 0, 20)>,
+			        <NRF_PSEL(QSPI_IO2, 0, 22)>,
+			        <NRF_PSEL(QSPI_IO3, 0, 17)>,
+			        <NRF_PSEL(QSPI_CSN, 0, 15)>;
+			low-power-enable;
+		};
+	};
+};
