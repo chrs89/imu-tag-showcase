@@ -66,6 +66,11 @@ west twister -p native_sim -T firmware/tests    # Linux or WSL only; CI on ubunt
 MCUboot signs with its development key unless `SB_CONFIG_BOOT_SIGNATURE_KEY_FILE`
 is set. Never commit a private key. The README states the dev-key situation.
 
+The Partition Manager lays out internal flash dynamically; the devicetree
+`fixed-partitions` node is not used. No image may be released for DFU until
+`firmware/pm_static.yml` freezes the map (NCS: static partition requirement
+for DFU). Until then every build is lab-only.
+
 ## Publishing rules
 
 - No employer names, supplier names, site names, personal names other than the

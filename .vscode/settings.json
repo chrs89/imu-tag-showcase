@@ -1,0 +1,10 @@
+{
+    "nrf-connect.applications": [
+        "${workspaceFolder}/firmware"
+    ],
+    "nrf-connect.boardRoots": [
+        "${workspaceFolder}/firmware"
+    ],
+    "nrf-connect.topdir": "${workspaceFolder}/..",
+    "nrf-connect.toolchain.path": "${nrf-connect.toolchain:3.3.0}"
+}

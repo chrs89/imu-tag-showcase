@@ -2,6 +2,20 @@
 
 Open items that are not tracked as TODO comments in code (see `CLAUDE.md`).
 
+## Release blockers
+
+Must be closed before any image leaves the bench. See the wiki README
+section "Release blockers".
+
+- static partition map (chapter 16): the Partition Manager lays out
+  internal flash dynamically and the map can move between builds; Nordic
+  requires a static map for DFU. Generate `firmware/pm_static.yml` from
+  the last lab `build/partitions.yml` and commit it.
+- production signing key (chapter 16): MCUboot still verifies against the
+  MCUboot development key (`SB_CONFIG_BOOT_SIGNATURE_KEY_FILE` unset).
+- image confirmation after FOTA (chapter 16): the application must confirm
+  a new image, otherwise MCUboot reverts it on the next reset.
+
 ## Open
 
 - measure sleep current with QSPI driver off (chapter 14): the MX25R6435F
