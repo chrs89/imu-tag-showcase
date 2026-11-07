@@ -26,6 +26,13 @@ section "Release blockers".
   `CONFIG_CONSOLE` is not enabled (build warning). The boot line arrives
   through `CONFIG_LOG_BACKEND_RTT`, not the console. Decide whether the
   console lines go or `CONFIG_CONSOLE=y` comes.
+- logging thread stack (chapter 3): 528 of the default 768 bytes used
+  (68 %) after two short boot messages, measured with the thread analyzer
+  on 2026-11-07. One longer format string from any module can overflow
+  it, and without `CONFIG_HW_STACK_PROTECTION` an overflow corrupts memory
+  silently (the first analyzer run did exactly that). Decide between
+  `CONFIG_LOG_PROCESS_THREAD_STACK_SIZE=1024` in `prj.conf` and
+  `CONFIG_HW_STACK_PROTECTION=y`; measure again after chapter 9.
 
 ## Baselines
 
@@ -38,6 +45,15 @@ section "Release blockers".
   +1192 B. The first work item makes the linker keep the system work queue
   thread: 1024 B stack plus thread and queue structs. Flash 37976 B with
   all three stubs.
+- stack baseline, step 2 (2026-11-07, `firmware/debug.conf` overlay,
+  `thread_analyzer_print(0)` 5 s after boot, no FIFO, no BLE, no DSP), used
+  / size: `burst_proc` 264 / 1024 (25 %), `sysworkq` 288 / 1024 (28 %),
+  `logging` 528 / 2048 (25 %, overlay size; 768 in the default build),
+  `idle` 64 / 320 (20 %), `main` 584 / 1024 (57 %), `ISR0` 216 / 2048
+  (10 %). The 264 B of `burst_proc` are its one `LOG_INF`; the blocked loop
+  itself uses next to nothing. Repeat after chapter 9 wires the FIFO and
+  after chapter 11 adds DSP, then size the stacks from the measurements
+  (chapter 3 rule: worst case plus 25 %, rounded up to 256).
 
 ## Closed
 
