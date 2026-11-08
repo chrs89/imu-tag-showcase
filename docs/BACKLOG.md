@@ -37,6 +37,18 @@ section "Release blockers".
   when the FIFO is configured; `s_isr_count` and `s_burst_count` must track
   each other within one.
 
+## Later, after the showcase ships
+
+- upstream contribution path for the IMU (not now): the Zephyr driver has a
+  FIFO stream mode (`CONFIG_LSM6DSV16X_STREAM`, RTIO asynchronous sensor
+  API) that could replace the own FIFO path in `imu_fifo` and `imu_ext`,
+  and it lacks the free-fall and tap triggers this firmware configures
+  through the ST HAL. Contributing those triggers as a Zephyr pull request
+  is a larger and less predictable project than the showcase itself. The
+  current design, own HAL context behind one owner (ADR-004), is the common
+  product choice and stays; what matters for review is the clean,
+  documented and measured boundary. Revisit after the first FOTA release.
+
 ## Closed
 
 - revert reg1 LDO override (chapter 1b): `&reg1` is now
