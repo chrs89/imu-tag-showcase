@@ -35,4 +35,8 @@ bool imu_fifo_int1_active(void);
  *  @return bursts completed since boot. */
 uint32_t imu_fifo_burst_count(void);
 
+/** Called from any thread; atomic_get on s_isr_count.
+ *  @return INT1 ISR invocations since boot. */
+uint32_t imu_fifo_isr_count(void);
+
 #endif /* IMU_FIFO_H_ */

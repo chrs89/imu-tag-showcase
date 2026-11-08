@@ -1,0 +1,13 @@
+
+menu "IMU Tag"
+
+config IMU_TAG_DEBUG_COUNTERS
+        bool "Log the INT1 and burst counters every 5 s"
+        default n
+        help
+          Bench instrument for the measurements page. Main logs
+          imu_fifo_isr_count() and imu_fifo_burst_count() every 5 s.
+
+endmenu
+
+source "Kconfig.zephyr"
