@@ -33,27 +33,9 @@ section "Release blockers".
   silently (the first analyzer run did exactly that). Decide between
   `CONFIG_LOG_PROCESS_THREAD_STACK_SIZE=1024` in `prj.conf` and
   `CONFIG_HW_STACK_PROTECTION=y`; measure again after chapter 9.
-
-## Baselines
-
-- RAM baseline after chapter 2 (2026-11-06, `west build -d build/firmware
-  -t ram_report`, application image only): 9584 B of 256 KB used (3.66 %),
-  flash 37252 B of 499200 B (7.46 %). Largest items: interrupt stack 2048 B,
-  RTT up buffer 1024 B, main stack 1024 B, CryptoCell platform context
-  448 B. Chapter 2b compares against this.
-- RAM after chapter 2b stubs (2026-11-06, same report): 10776 B (4.21 %),
-  +1192 B. The first work item makes the linker keep the system work queue
-  thread: 1024 B stack plus thread and queue structs. Flash 37976 B with
-  all three stubs.
-- stack baseline, step 2 (2026-11-07, `firmware/debug.conf` overlay,
-  `thread_analyzer_print(0)` 5 s after boot, no FIFO, no BLE, no DSP), used
-  / size: `burst_proc` 264 / 1024 (25 %), `sysworkq` 288 / 1024 (28 %),
-  `logging` 528 / 2048 (25 %, overlay size; 768 in the default build),
-  `idle` 64 / 320 (20 %), `main` 584 / 1024 (57 %), `ISR0` 216 / 2048
-  (10 %). The 264 B of `burst_proc` are its one `LOG_INF`; the blocked loop
-  itself uses next to nothing. Repeat after chapter 9 wires the FIFO and
-  after chapter 11 adds DSP, then size the stacks from the measurements
-  (chapter 3 rule: worst case plus 25 %, rounded up to 256).
+- INT1 counters at 240 Hz and 960 Hz (chapter 4 task 4): pending chapter 9,
+  when the FIFO is configured; `s_isr_count` and `s_burst_count` must track
+  each other within one.
 
 ## Closed
 

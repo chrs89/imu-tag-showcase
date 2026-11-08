@@ -13,6 +13,8 @@ this repository, and the SDK is cloned next to it, never inside it.
 - `docs/adr/`: ADR-001 FIFO pipeline, ADR-002 DSP worker, ADR-003 runtime ODR,
   ADR-004 IMU driver extension, ADR-005 command table.
 - `firmware/src/imu/imu_ext.h`: the only place that touches LSM6DSV16X registers.
+- `docs/MEASUREMENTS.md`: every measured figure, one entry each, with instrument,
+  setup, raw and derived value. A number without an entry there is an estimate.
 
 ## Rules that are not obvious from the code
 
@@ -80,6 +82,8 @@ for DFU). Until then every build is lab-only.
 - English only. Every public function has a one-line doc comment.
 - Comments state facts verified on hardware or in the SDK tree, not assumptions.
   If something is unverified, say "unverified" in the comment.
+- Figures in comments, ADRs and the README cite their `docs/MEASUREMENTS.md`
+  entry (`M-<chapter>-<n>`). `docs/BACKLOG.md` holds decisions, never figures.
 
 ## Style
 
