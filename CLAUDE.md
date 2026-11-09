@@ -30,8 +30,11 @@ this repository, and the SDK is cloned next to it, never inside it.
    waits except the documented mag-sample copy, no logging per sample, no FFT.
    Heavy work goes to `dsp_worker` or a work item.
 4. **ISRs only signal.** INT1 gives a semaphore, INT2 submits a work item. Nothing else.
-5. **Only the system work queue mutates `app_config` and `app_state`.** BLE write
-   callbacks schedule a command; they never run handlers inline.
+   Handlers on `app_wq` may take `s_imu_lock`; handlers on the system work queue
+   hold it for one SPI transaction at most.
+5. **Only `app_wq` mutates `app_config` and `app_state`.** The system work queue
+   runs SDK items and the INT2 event item, nothing else from the application. BLE
+   write callbacks schedule a command on `app_wq`; they never run handlers inline.
 6. **Event triggers are tuned for 240 Hz.** `event_triggers_arm()` refuses any other
    ODR, and the ODR setter refuses while triggers are armed (ADR-003). Keep both
    guards in sync.

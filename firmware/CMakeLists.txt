@@ -14,4 +14,6 @@ target_sources(app PRIVATE
   src/imu/imu_fifo.c
   src/events/event_triggers.c
   src/pipeline/burst_processor.c
+  src/app/app_wq.c
+  src/status/stats.c
 )
