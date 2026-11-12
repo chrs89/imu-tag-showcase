@@ -1,0 +1,11 @@
+{
+    "configurations": [
+        {
+            "name": "imu_tag_v1",
+            "compileCommands": "${workspaceFolder}/build/firmware/compile_commands.json",
+            "intelliSenseMode": "gcc-arm",
+            "cStandard": "c11"
+        }
+    ],
+    "version": 4
+}
