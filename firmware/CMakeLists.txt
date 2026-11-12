@@ -15,5 +15,7 @@ target_sources(app PRIVATE
   src/events/event_triggers.c
   src/pipeline/burst_processor.c
   src/app/app_wq.c
+  src/app/app_config.c
+  src/app/app_state.c
   src/status/stats.c
 )
