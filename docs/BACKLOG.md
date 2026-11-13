@@ -62,6 +62,17 @@ section "Release blockers".
   an overrun or a FIFO flush; the accumulator restarts its window on it
   (review F3).
 
+## Pre-publication checks
+
+Run from the repository root in PowerShell before every push. Each command
+must print nothing.
+
+- no private driver include, no cast into the driver, no cast of a bus
+  function to a HAL pointer type (chapter 8, ADR-004):
+  `Get-ChildItem -Recurse -File firmware\src | Select-String -Pattern '->config|lsm6dsv16x_config|lsm6dsv16x\.h"|stmemsc|stmdev_(read|write)_ptr\)'`
+- no `TODO` in published code (`CLAUDE.md`, publishing rules):
+  `Get-ChildItem -Recurse -File firmware\src, firmware\tests | Select-String -CaseSensitive -Pattern 'TODO'`
+
 ## Later, after the showcase ships
 
 - upstream contribution path for the IMU (not now): the Zephyr driver has a
