@@ -3,7 +3,9 @@
 #include "imu/imu_fifo.h"
 #include <zephyr/logging/log.h>
 #ifdef CONFIG_TIMING_FUNCTIONS
+#include <string.h>
 #include <zephyr/timing/timing.h>
+#include "dsp/dsp_accumulator.h"
 #endif
 
 LOG_MODULE_REGISTER(stats, LOG_LEVEL_INF);
@@ -33,6 +35,25 @@ static void periodic_log_fn(struct k_work *work)
                 LOG_INF("log cost %u cycles, %u ns", (uint32_t)s_last_cycles,
                         (uint32_t)timing_cycles_to_ns(s_last_cycles));
         }
+
+        /* M-07-3, debug build only: time of one copy of a full DSP window,
+         * the longest the consumer can hold a slot of dsp_accumulator. The
+         * source changes every tick and the destination is read back, so
+         * the compiler cannot drop the copy. */
+        static float s_copy_src[DSP_MAX_WINDOW_SAMPLES];
+        static float s_copy_dst[DSP_MAX_WINDOW_SAMPLES];
+        timing_t c0, c1;
+        uint64_t copy_cycles;
+
+        s_copy_src[0] += 1.0f;
+        c0 = timing_counter_get();
+        memcpy(s_copy_dst, s_copy_src, sizeof(s_copy_src));
+        c1 = timing_counter_get();
+        copy_cycles = timing_cycles_get(&c0, &c1);
+        LOG_INF("memcpy %u B: %u cycles, %u ns, check %d", (uint32_t)sizeof(s_copy_src),
+                (uint32_t)copy_cycles, (uint32_t)timing_cycles_to_ns(copy_cycles),
+                (int)s_copy_dst[0]);
+
         t0 = timing_counter_get();
 #endif
 

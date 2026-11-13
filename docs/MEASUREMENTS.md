@@ -48,9 +48,10 @@ replaced by an entry below; until then it is an assumption.
 | --- | --- | --- | --- |
 | INT1 rising edge to first SPI byte "well under 50 us" | chapter 4 section 7 | logic analyser | pending, chapter 9 |
 | one FIFO burst of 254 rows takes about 1.8 ms at 8 MHz | chapter 8 section 6, review section 2 | logic analyser | pending, chapter 9 |
+| one `burst_proc` loop pass (SPI read, decode, sinks, BLE flush) takes about 0.1 ms and stays under 1 ms | deep dive A3, chapter 7 section 2 | DWT | pending, chapter 9 (`M-09-4`) |
 | a `LOG_INF` in a handler costs "a few microseconds" (deferred mode) | chapter 5 section 6 | DWT | pending, chapter 5 |
 | uncontended mutex lock plus unlock: hundreds of cycles; spinlock pair: tens | chapter 6 sections 2 and 3 | DWT | pending, chapter 6 |
-| consumer hold time of the DSP slot, one 2 kB memcpy, about 30 us | chapter 7 section 5 | DWT | pending, chapter 7 |
+| consumer hold time of the DSP slot, one 2 kB memcpy, about 30 us | chapter 7 section 5 | DWT | pending, chapter 7 (`M-07-3`, hook in `stats.c`) |
 | FFT 64 to 512 points: 0.5 to 3 ms | deep dive A3, chapter 7 section 7 | DWT | pending, chapter 11 |
 | BLE flush of 14 notifications: about 2 ms | review F7, chapter 5 section 6 | DWT and sniffer | pending, chapter 12 |
 | current per acquisition profile: 315 to 84 uA | ADR-001 table, chapter 9 | PPK2 | pending, chapters 9 and 14 |
@@ -107,3 +108,23 @@ replaced by an entry below; until then it is an assumption.
 - Derived: against M-03-1, `burst_proc` -8 B (the loop blocks in `imu_fifo_wait()` instead of on its own semaphore) and `main` +16 B (the `imu_fifo_init()` call and its log line); every other thread unchanged
 - Compared with: M-03-1
 - Next: after chapter 9 (FIFO) and chapter 11 (DSP), then size every stack from the figures
+
+### M-07-1  host tests of the DSP window hand-off, consumer lag case
+- Date, commit: 2026-11-13, chapter 7 commit
+- Build: in WSL (Ubuntu 22.04), from `/mnt/c/private/ws/imu-tag-showcase`: `nrfutil sdk-manager toolchain launch --ncs-version v3.3.0 -- west twister -p native_sim -T firmware/tests -O ~/twister-out`
+- Instrument: twister on `native_sim`, ztest
+- Setup: suites `imu_tag.app_config` (3 cases) and `imu_tag.dsp_accumulator` (4 cases); window length 8 samples; producer and consumer on the test thread, lag produced by not calling `dsp_accumulator_wait_window()`
+- Raw: 2 of 2 test configurations passed, 7 of 7 test cases passed, 0 filtered, 0 failed, 253.58 s. The same command in Windows PowerShell filters both configurations and executes 0 cases
+- Derived: with three windows pushed and none taken, two windows are delivered in order (`seq` 1, 2), exactly 1 window is dropped and counted once, the next window is `seq` 3, and the semaphore count ends at 0. The wedge of review F2 does not occur
+- Compared with: chapter 7 section 4 (private design: second take returns the same slot again, producer blocked for good)
+- Next: repeated by CI on every push (chapter 17)
+
+### M-07-2  ordering of the stores before the READY publication in dsp_accumulator_push
+- Date, commit: 2026-11-13, chapter 7 commit
+- Build: `west build -d build` (default configuration), object `build/firmware/CMakeFiles/app.dir/src/dsp/dsp_accumulator.c.obj`
+- Instrument: `arm-zephyr-eabi-objdump -d -r --disassemble=dsp_accumulator_push` and `--disassemble=atomic_set.isra.0` on the object file. The linked `zephyr.elf` does not contain the function yet: nothing calls it, so the linker discards its section
+- Setup: none, static inspection
+- Raw: in `dsp_accumulator_push`: `strh` to `s_len` at offset 0x6c, `str` to `s_seq` at 0x7e, `bl atomic_set.isra.0` at 0x84, `bl z_impl_k_sem_give` at 0x8a. `atomic_set.isra.0` is `dmb ish`, `ldrex`, `strex`, `cmp`, `bne`, `dmb ish`, `bx lr`
+- Derived: the length and sequence stores precede the READY store, and a `dmb` sits between them and the exclusive store, as chapter 7 section 3 requires. The compiler did not inline `atomic_set()` here but emitted one shared copy for the three call sites in the file, so the barrier is inside the callee, not in the body of `push`
+- Compared with: chapter 7 "One layer below" (expected the `dmb` inline in `push`)
+- Next: repeat on `zephyr.elf` after chapter 11, when `dsp_worker` and the DSP sink call the module

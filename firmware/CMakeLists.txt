@@ -18,4 +18,5 @@ target_sources(app PRIVATE
   src/app/app_config.c
   src/app/app_state.c
   src/status/stats.c
+  src/dsp/dsp_accumulator.c
 )

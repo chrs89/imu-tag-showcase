@@ -36,6 +36,12 @@ section "Release blockers".
 - INT1 counters at 240 Hz and 960 Hz (chapter 4 task 4): pending chapter 9,
   when the FIFO is configured; `s_isr_count` and `s_burst_count` must track
   each other within one.
+- DSP result ring (chapter 12): the spectrum packets must not share the
+  lossy live-stream ring; second ring, flushed by the DSP sink after the
+  last chunk (review F8).
+- discontinuity flag (chapter 9): the decoder marks the first sample after
+  an overrun or a FIFO flush; the accumulator restarts its window on it
+  (review F3).
 
 ## Later, after the showcase ships
 
