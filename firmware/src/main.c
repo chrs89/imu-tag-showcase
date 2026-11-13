@@ -1,4 +1,5 @@
 #include <zephyr/kernel.h>
+#include <zephyr/device.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/app_version.h>
 #include <zephyr/drivers/hwinfo.h>
@@ -9,6 +10,7 @@
 
 #include "app/app_wq.h"
 #include "pipeline/burst_processor.h"
+#include "imu/imu_ext.h"
 #include "imu/imu_fifo.h"
 #include "status/stats.h"
 
@@ -30,6 +32,17 @@ int main(void)
 
         app_wq_init();
         stats_init();
+
+        /* Boot health check: the upstream driver probed the chip before main(). */
+        if (!device_is_ready(DEVICE_DT_GET(DT_ALIAS(imu0)))) {
+                LOG_ERR("LSM6DSV16X driver not ready");
+        }
+        rc = imu_ext_init();
+        if (rc != 0) {
+                LOG_ERR("imu_ext_init failed: %d", rc);
+        } else {
+                LOG_INF("imu_ext_init returned 0");
+        }
 
         rc = burst_processor_init();
         if (rc != 0) {

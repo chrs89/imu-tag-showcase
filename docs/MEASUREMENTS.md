@@ -52,7 +52,7 @@ replaced by an entry below; until then it is an assumption.
 | a `LOG_INF` in a handler costs "a few microseconds" (deferred mode) | chapter 5 section 6 | DWT | pending, chapter 5 |
 | uncontended mutex lock plus unlock: hundreds of cycles; spinlock pair: tens | chapter 6 sections 2 and 3 | DWT | pending, chapter 6 |
 | consumer hold time of the DSP slot, one 2 kB memcpy, about 30 us | chapter 7 section 5 | DWT | pending, chapter 7 (`M-07-3`, hook in `stats.c`) |
-| FFT 64 to 512 points: 0.5 to 3 ms | deep dive A3, chapter 7 section 7 | DWT | pending, chapter 11 |
+| FFT 64 to 512 points: 0.5 to 3 ms, with the hardware FPU enabled | deep dive A3, chapter 7 section 7 | DWT | pending, chapter 11 |
 | BLE flush of 14 notifications: about 2 ms | review F7, chapter 5 section 6 | DWT and sniffer | pending, chapter 12 |
 | current per acquisition profile: 315 to 84 uA | ADR-001 table, chapter 9 | PPK2 | pending, chapters 9 and 14 |
 | logging thread stack 768 B is enough | backlog open item | thread analyzer | pending, chapter 9 |
