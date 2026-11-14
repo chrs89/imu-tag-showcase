@@ -53,9 +53,10 @@ section "Release blockers".
 - sample timestamps (chapter 9): decided. Microseconds of MCU uptime in
   32 bits; the time anchor of a burst is the INT1 edge time stored by the
   ISR, the status-read time is the fallback; consumers take dt from the
-  sample rate, never from timestamp differences (review F9). Open until
-  the code and the anchor measurements of chapter 9 exist; `CLAUDE.md`
-  rules 4 and 9 are reworded with the code.
+  sample rate, never from timestamp differences (review F9). The code is
+  in (`imu_fifo.c`, `fifo_decode.c`) and `CLAUDE.md` rules 4 and 9 are
+  reworded; open until the anchor measurements of chapter 9 are taken on
+  the bench.
 - sensor hardware timestamp (later): the LSM6DSV16X can batch its own
   timestamp into the FIFO. Not used; revisit only if the measured
   deviation of the sensor rate from nominal matters for the background
@@ -66,9 +67,16 @@ section "Release blockers".
 - DSP result ring (chapter 12): the spectrum packets must not share the
   lossy live-stream ring; second ring, flushed by the DSP sink after the
   last chunk (review F8).
-- discontinuity flag (chapter 9): the decoder marks the first sample after
-  an overrun or a FIFO flush; the accumulator restarts its window on it
-  (review F3).
+- discontinuity flag (chapters 9 and 11): the decoder marks the first
+  sample after an overrun, a clipped burst or a FIFO flush (done, host
+  tested). Open: the accumulator restarts its window on it (review F3),
+  and the caller of `imu_ext_set_odr()` marks the stream once the command
+  path exists (chapter 12).
+- watermark unit (chapter 9): the code treats the watermark as rows, two
+  per sample, as the sensor binding says. The burst time anchor depends
+  on it. Confirm on the bench, then replace `CLAUDE.md` rule 10.
+- `burst_proc` stack (chapter 9): raised to 2048 bytes for the decoder
+  and the sinks without a measurement; size it with the thread analyzer.
 
 ## Pre-publication checks
 

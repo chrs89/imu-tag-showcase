@@ -29,7 +29,9 @@ this repository, and the SDK is cloned next to it, never inside it.
    run on the acquisition thread for every sample. No sleeping, no `K_FOREVER`
    waits except the documented mag-sample copy, no logging per sample, no FFT.
    Heavy work goes to `dsp_worker` or a work item.
-4. **ISRs only signal.** INT1 gives a semaphore, INT2 submits a work item. Nothing else.
+4. **ISRs only mark the time and signal.** INT1 stores the edge time (one clock
+   read, one atomic store) and gives a semaphore, INT2 submits a work item.
+   Nothing else.
    Handlers on `app_wq` may take `s_imu_lock`; handlers on the system work queue
    hold it for one SPI transaction at most.
 5. **Only `app_wq` mutates `app_config` and `app_state`.** The system work queue
@@ -43,8 +45,11 @@ this repository, and the SDK is cloned next to it, never inside it.
    and ODR. Do not hard-code seconds.
 8. **Register reconfiguration happens with the FIFO in bypass.** Feature setup
    (tap, free-fall, motion) and range or rate changes are not done mid-stream.
-9. **Units:** accel in m/s2, gyro in rad/s, mag in uT, timestamps in ms from
-   `k_uptime_get_32()`. BLE packets carry Q1.15 scaled by the runtime full scale.
+9. **Units:** accel in m/s2, gyro in rad/s, mag in uT. Sample timestamps are
+   microseconds of MCU uptime in 32 bits; they wrap every 71.6 minutes, so
+   compare by unsigned difference. The time step for integration is the sample
+   period (`1 / imu_odr_hz`), never a difference of timestamps. BLE packets
+   carry Q1.15 scaled by the runtime full scale.
 10. **Watermark unit: unverified.** The binding and the observed 59 Hz batch rate
     suggest one FIFO word (tag plus 6 bytes), so 8 words would be 4 accel+gyro
     pairs. Until one bench measurement confirms it, no published latency figure

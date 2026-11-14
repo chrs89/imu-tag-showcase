@@ -1,6 +1,8 @@
 #include "status/stats.h"
 #include "app/app_wq.h"
 #include "imu/imu_fifo.h"
+#include "pipeline/burst_processor.h"
+#include "pipeline/log_sink.h"
 #include <zephyr/logging/log.h>
 #ifdef CONFIG_TIMING_FUNCTIONS
 #include <string.h>
@@ -11,6 +13,53 @@
 LOG_MODULE_REGISTER(stats, LOG_LEVEL_INF);
 
 static struct periodic_log s_stats_log = { .period_ms = 5000 };
+
+#ifdef CONFIG_IMU_TAG_DEBUG_COUNTERS
+/* Bench lines for the measurements page: margin counters, the newest sample,
+ * and the two time anchors of a burst compared (ticks of the system clock). */
+static void log_acquisition(void)
+{
+	struct imu_fifo_stats st;
+	struct imu_fifo_anchor_stats an;
+	imu_sample_t s;
+
+	imu_fifo_get_stats(&st);
+	LOG_INF("fifo: samples %u at tick %u, level max %u, overruns %u, orphans %u, "
+		"unknown tags %u, bus errors %u, anchor fallbacks %u",
+		st.samples, (uint32_t)k_uptime_ticks(), st.level_max, st.overruns, st.orphans,
+		st.unknown_tags, st.bus_errors, st.anchor_fallbacks);
+
+	if (log_sink_latest(&s) != 0u) {
+		LOG_INF("sink: discontinuities %u, last seq %u ts %u us, accel mm/s2 %d %d %d, "
+			"gyro mrad/s %d %d %d",
+			log_sink_discontinuities(), s.seq, s.timestamp_us,
+			(int)(s.accel.x * 1000.0f), (int)(s.accel.y * 1000.0f),
+			(int)(s.accel.z * 1000.0f), (int)(s.gyro.x * 1000.0f),
+			(int)(s.gyro.y * 1000.0f), (int)(s.gyro.z * 1000.0f));
+	}
+
+	imu_fifo_anchor_stats_take(&an);
+	if (an.count != 0u) {
+		LOG_INF("anchor: n %u, thread minus isr ticks min %d max %d mean x100 %d",
+			an.count, an.min_ticks, an.max_ticks,
+			(int32_t)(an.sum_ticks * 100 / (int64_t)an.count));
+		LOG_INF("anchor bins <1 <2 <4 <8 <16 <32 <64 <128 >=128: "
+			"%u %u %u %u %u %u %u %u %u",
+			an.hist[0], an.hist[1], an.hist[2], an.hist[3], an.hist[4], an.hist[5],
+			an.hist[6], an.hist[7], an.hist[8]);
+	}
+#ifdef CONFIG_TIMING_FUNCTIONS
+	uint32_t last_ns, max_ns;
+
+	burst_processor_pass_ns(&last_ns, &max_ns);
+	LOG_INF("burst pass: last %u ns, max %u ns", last_ns, max_ns);
+#endif
+}
+#else
+static void log_acquisition(void)
+{
+}
+#endif
 
 /* Runs on app_wq every period_ms. Logs the INT1 counters and re-arms itself. */
 static void periodic_log_fn(struct k_work *work)
@@ -58,6 +107,7 @@ static void periodic_log_fn(struct k_work *work)
 #endif
 
         LOG_INF("int1 isr %u, bursts %u", imu_fifo_isr_count(), imu_fifo_burst_count());
+        log_acquisition();
 
 #ifdef CONFIG_TIMING_FUNCTIONS
         t1 = timing_counter_get();

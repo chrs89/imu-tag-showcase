@@ -12,6 +12,8 @@
 #include "pipeline/burst_processor.h"
 #include "imu/imu_ext.h"
 #include "imu/imu_fifo.h"
+#include "app/app_config.h"
+#include "pipeline/log_sink.h"
 #include "status/stats.h"
 
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
@@ -21,6 +23,7 @@ LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 int main(void)
 {
         uint32_t cause = 0;
+        app_config_t cfg;
         int rc = hwinfo_get_reset_cause(&cause);
 
 
@@ -44,12 +47,19 @@ int main(void)
                 LOG_INF("imu_ext_init returned 0");
         }
 
+        /* Sinks first: the table is read-only once the thread exists. */
+        rc = burst_processor_register_sink(log_sink);
+        if (rc != 0) {
+                LOG_ERR("log sink not registered: %d", rc);
+        }
         rc = burst_processor_init();
         if (rc != 0) {
                 LOG_ERR("burst processor init failed: %d", rc);
         }
 
-        rc = imu_fifo_init(0);
+        /* Starts the FIFO; from here on INT1 wakes the burst thread. */
+        app_config_snapshot(&cfg);
+        rc = imu_fifo_init((uint16_t)cfg.acq_profile);
         if (rc != 0) {
                 LOG_ERR("imu_fifo_init failed: %d", rc);
         } else {

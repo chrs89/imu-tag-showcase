@@ -17,10 +17,12 @@ LOG_MODULE_REGISTER(imu_ext, LOG_LEVEL_INF); /* Later: CONFIG_IMU_TAG_LOG_LEVEL,
  * matching spi-cpol and spi-cpha in the board file. */
 #define IMU_SPI_OP   (SPI_OP_MODE_MASTER | SPI_WORD_SET(8) | SPI_MODE_CPOL | SPI_MODE_CPHA)
 #define IMU_SPI_READ 0x80u /* bit 7 of the address byte selects a read */
+#define IMU_FIFO_ROW_BYTES 7u /* one tag byte and six data bytes */
 
 /* static state */
 static const struct spi_dt_spec s_spi = SPI_DT_SPEC_GET(DT_ALIAS(imu0), IMU_SPI_OP);
 static K_MUTEX_DEFINE(s_imu_lock);
+static size_t s_rate_idx; /* row of s_rates in force; written under s_imu_lock */
 
 /* Output rate and FIFO batch rate always change together (CLAUDE.md rule 2). */
 static const struct {
@@ -96,8 +98,34 @@ static int32_t set_rate_locked(size_t idx)
 	rc = (rc != 0) ? rc : lsm6dsv16x_fifo_xl_batch_set(&s_ctx, s_rates[idx].xl_batch);
 	rc = (rc != 0) ? rc : lsm6dsv16x_fifo_gy_batch_set(&s_ctx, s_rates[idx].gy_batch);
 	rc = (rc != 0) ? rc : lsm6dsv16x_fifo_mode_set(&s_ctx, mode);
+	if (rc == 0) {
+		s_rate_idx = idx;
+	}
 
 	return rc;
+}
+
+/* FIFO start as one register sequence; runs to the end on every path. */
+static int32_t fifo_start_locked(uint8_t watermark_rows)
+{
+	lsm6dsv16x_pin_int_route_t route = {0};
+	int32_t rc = lsm6dsv16x_fifo_mode_set(&s_ctx, LSM6DSV16X_BYPASS_MODE);
+
+	rc = (rc != 0) ? rc : lsm6dsv16x_fifo_watermark_set(&s_ctx, watermark_rows);
+	rc = (rc != 0) ? rc : lsm6dsv16x_fifo_xl_batch_set(&s_ctx, s_rates[s_rate_idx].xl_batch);
+	rc = (rc != 0) ? rc : lsm6dsv16x_fifo_gy_batch_set(&s_ctx, s_rates[s_rate_idx].gy_batch);
+	rc = (rc != 0) ? rc : lsm6dsv16x_pin_int1_route_get(&s_ctx, &route);
+	route.fifo_th = PROPERTY_ENABLE;
+	rc = (rc != 0) ? rc : lsm6dsv16x_pin_int1_route_set(&s_ctx, &route);
+	rc = (rc != 0) ? rc : lsm6dsv16x_fifo_mode_set(&s_ctx, LSM6DSV16X_STREAM_MODE);
+
+	return rc;
+}
+
+/* The watermark register holds 8 bits; an even value keeps bursts in pairs. */
+static bool watermark_valid(uint8_t watermark_rows)
+{
+	return watermark_rows != 0u && (watermark_rows & 1u) == 0u;
 }
 
 /* public API: validate at the boundary */
@@ -152,11 +180,67 @@ int imu_ext_set_accel_range(uint8_t range_g)
 	return -ENOSYS;
 }
 
-int imu_ext_fifo_read(uint8_t *buf, uint16_t max_rows)
+int imu_ext_fifo_start(uint8_t watermark_rows)
 {
-	ARG_UNUSED(buf);
-	ARG_UNUSED(max_rows);
-	return -ENOSYS;
+	int32_t rc;
+
+	if (!watermark_valid(watermark_rows)) {
+		return -EINVAL;
+	}
+
+	k_mutex_lock(&s_imu_lock, K_FOREVER);
+	rc = fifo_start_locked(watermark_rows);
+	k_mutex_unlock(&s_imu_lock);
+
+	return (rc != 0) ? -EIO : 0;
+}
+
+int imu_ext_fifo_set_watermark(uint8_t watermark_rows)
+{
+	int32_t rc;
+
+	if (!watermark_valid(watermark_rows)) {
+		return -EINVAL;
+	}
+
+	k_mutex_lock(&s_imu_lock, K_FOREVER);
+	rc = lsm6dsv16x_fifo_watermark_set(&s_ctx, watermark_rows);
+	k_mutex_unlock(&s_imu_lock);
+
+	return (rc != 0) ? -EIO : 0;
+}
+
+int imu_ext_fifo_read(uint8_t *buf, uint16_t max_rows, struct imu_fifo_info *info)
+{
+	lsm6dsv16x_fifo_status_t st = {0};
+	uint16_t rows = 0;
+	uint32_t ticks;
+	int32_t rc;
+
+	/* One lock around both transfers: a rate change flushes the FIFO and
+	 * must not land between the level and the rows it counts. */
+	k_mutex_lock(&s_imu_lock, K_FOREVER);
+	rc = lsm6dsv16x_fifo_status_get(&s_ctx, &st);
+	/* The level is a fact about this instant: rows that arrive during the
+	 * row read stay in the FIFO. Fallback time anchor of the burst. */
+	ticks = (uint32_t)k_uptime_ticks();
+	if (rc == 0) {
+		rows = st.fifo_level & ~1u; /* whole pairs only */
+		if (rows > max_rows) {
+			rows = max_rows & ~1u;
+		}
+		if (rows > 0u) {
+			rc = lsm6dsv16x_read_reg(&s_ctx, LSM6DSV16X_FIFO_DATA_OUT_TAG, buf,
+						 (uint16_t)(rows * IMU_FIFO_ROW_BYTES));
+		}
+	}
+	k_mutex_unlock(&s_imu_lock);
+
+	info->level = st.fifo_level;
+	info->overrun = st.fifo_ovr != 0u;
+	info->clipped = (st.fifo_level & ~1u) > max_rows;
+	info->status_ticks = ticks;
+	return (rc != 0) ? -EIO : (int)rows;
 }
 
 int imu_ext_read_event_status(uint8_t *status)

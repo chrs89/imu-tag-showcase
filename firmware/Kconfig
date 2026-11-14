@@ -2,11 +2,12 @@
 menu "IMU Tag"
 
 config IMU_TAG_DEBUG_COUNTERS
-        bool "Log the INT1 and burst counters every 5 s"
+        bool "Log the acquisition counters every 5 s"
         default n
         help
-          Bench instrument for the measurements page. Main logs
-          imu_fifo_isr_count() and imu_fifo_burst_count() every 5 s.
+          Bench instrument for the measurements page. The stats item logs
+          the FIFO margin counters, the newest sample and the comparison
+          of the two burst time anchors every 5 s.
 
 endmenu
 

@@ -12,13 +12,14 @@
  * through one setter per field group. No function hands out a pointer
  * into the live struct (chapter 6 section 5, A4 section 7). */
 
-/** FIFO watermark in rows; selects wake rate, latency and power. */
+/** FIFO watermark in rows; selects wake rate, latency and power. Two rows
+ *  make one sample if the watermark counts rows, as the sensor binding says
+ *  (unverified until the bench check, CLAUDE.md rule 10). Every value is even
+ *  and fits the 8-bit watermark register. */
 typedef enum {
-        ACQ_PROFILE_LIVE_REALTIME = 8,     /* 33 ms,  30 Hz, live BLE */
-        ACQ_PROFILE_LIVE_BALANCED = 16,    /* 67 ms,  15 Hz, monitoring */
-        ACQ_PROFILE_RECORD_LIVE   = 32,    /* 133 ms,  8 Hz, recording and BLE */
-        ACQ_PROFILE_RECORD_ONLY   = 128,   /* 533 ms,  2 Hz, recording */
-        ACQ_PROFILE_BACKGROUND    = 256,   /* 1 s,     1 Hz, background */
+        ACQ_PROFILE_LIVE_REALTIME = 8,     /* 4 samples per burst, live BLE */
+        ACQ_PROFILE_LIVE_BALANCED = 16,    /* 8 samples per burst, monitoring */
+        ACQ_PROFILE_BACKGROUND    = 254,   /* 127 samples per burst, background */
 } acq_profile_t;
 
 typedef struct {

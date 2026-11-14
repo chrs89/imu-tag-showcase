@@ -47,4 +47,19 @@ ZTEST(app_config, test_set_dsp_changes_whole_group)
         zassert_equal(cfg.dsp.enable_mask, 0x01);
 }
 
+ZTEST(app_config, test_profiles_fit_the_watermark_register)
+{
+	app_config_t cfg;
+
+	zassert_equal(app_config_set_acq_profile(ACQ_PROFILE_BACKGROUND), 0);
+	app_config_snapshot(&cfg);
+	zassert_equal(cfg.acq_profile, 254);
+
+	/* 256 was the private background profile; it does not fit 8 bits. */
+	zassert_equal(app_config_set_acq_profile((acq_profile_t)256), -EINVAL);
+	zassert_equal(app_config_set_acq_profile((acq_profile_t)32), -EINVAL);
+	app_config_snapshot(&cfg);
+	zassert_equal(cfg.acq_profile, 254);
+}
+
 ZTEST_SUITE(app_config, NULL, NULL, NULL, restore_defaults, NULL);

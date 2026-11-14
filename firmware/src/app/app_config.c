@@ -13,6 +13,12 @@ static app_config_t s_cfg = {
         .dsp = { .axis = 0, .window_idx = 0, .enable_mask = 0 },
 };
 
+/* The watermark register is 8 bits wide, and an even watermark keeps a burst
+ * in whole accel and gyro pairs. */
+BUILD_ASSERT(ACQ_PROFILE_LIVE_REALTIME <= 254 && (ACQ_PROFILE_LIVE_REALTIME & 1) == 0);
+BUILD_ASSERT(ACQ_PROFILE_LIVE_BALANCED <= 254 && (ACQ_PROFILE_LIVE_BALANCED & 1) == 0);
+BUILD_ASSERT(ACQ_PROFILE_BACKGROUND <= 254 && (ACQ_PROFILE_BACKGROUND & 1) == 0);
+
 /* Validation helpers. All run with no lock held. */
 
 /* The ODRs imu_ext_set_odr() accepts; chapter 8 owns the register table. */
@@ -40,8 +46,6 @@ static bool profile_valid(acq_profile_t profile)
         switch (profile) {
         case ACQ_PROFILE_LIVE_REALTIME:
         case ACQ_PROFILE_LIVE_BALANCED:
-        case ACQ_PROFILE_RECORD_LIVE:
-        case ACQ_PROFILE_RECORD_ONLY:
         case ACQ_PROFILE_BACKGROUND:
                 return true;
         default:

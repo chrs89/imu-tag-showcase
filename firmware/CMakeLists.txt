@@ -12,8 +12,10 @@ target_sources(app PRIVATE
   src/main.c
   src/imu/imu_ext.c
   src/imu/imu_fifo.c
+  src/imu/fifo_decode.c
   src/events/event_triggers.c
   src/pipeline/burst_processor.c
+  src/pipeline/log_sink.c
   src/app/app_wq.c
   src/app/app_config.c
   src/app/app_state.c
