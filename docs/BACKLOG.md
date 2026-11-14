@@ -50,8 +50,16 @@ section "Release blockers".
   32768. Prove the showcase value with a full turn on the bench and
   record the entry; state the full scale the BLE packet assumes
   (chapter 12).
-- timestamp resolution (chapter 10): samples carry milliseconds; decide
-  between dt from the sample rate and a microsecond field (review F9).
+- sample timestamps (chapter 9): decided. Microseconds of MCU uptime in
+  32 bits; the time anchor of a burst is the INT1 edge time stored by the
+  ISR, the status-read time is the fallback; consumers take dt from the
+  sample rate, never from timestamp differences (review F9). Open until
+  the code and the anchor measurements of chapter 9 exist; `CLAUDE.md`
+  rules 4 and 9 are reworded with the code.
+- sensor hardware timestamp (later): the LSM6DSV16X can batch its own
+  timestamp into the FIFO. Not used; revisit only if the measured
+  deviation of the sensor rate from nominal matters for the background
+  profile.
 - ODR setter guard (chapter 13): `imu_ext_set_odr()` must refuse with
   `-EBUSY` while event triggers are armed (`CLAUDE.md` rule 6, ADR-003).
   The guard comes with `event_triggers_arm()`; until then nothing can arm.
