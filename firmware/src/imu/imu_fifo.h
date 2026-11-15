@@ -3,7 +3,7 @@
  * read, time anchor, decode hand-off, margin counters.
  * Context: the INT1 ISR stores the edge time and gives s_fifo_sem; the burst
  * thread waits on it and reads the FIFO through imu_ext. Units: watermark in
- * FIFO rows (unverified until the bench check, CLAUDE.md rule 10), time in
+ * FIFO rows, two per sample (docs/MEASUREMENTS.md M-09-0), time in
  * microseconds of MCU uptime.
  * See docs/adr/ADR-001.
  */

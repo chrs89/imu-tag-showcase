@@ -10,6 +10,8 @@ static app_config_t s_cfg = {
         .accel_range_g = 2,                              /* board file: accel-range 2 g */
         .ble_downsample = 1,
         .acq_profile = ACQ_PROFILE_LIVE_REALTIME,
+        .fusion_mode = FUSION_MODE_9AXIS,
+        .fusion_beta_x1000 = 100,                        /* beta 0.1: 11.5 degrees per second */
         .dsp = { .axis = 0, .window_idx = 0, .enable_mask = 0 },
 };
 
@@ -51,6 +53,19 @@ static bool profile_valid(acq_profile_t profile)
         default:
                 return false;
         }
+}
+
+static bool fusion_valid(fusion_mode_t mode, uint16_t beta_x1000)
+{
+        switch (mode) {
+        case FUSION_MODE_OFF:
+        case FUSION_MODE_6AXIS:
+        case FUSION_MODE_9AXIS:
+                break;
+        default:
+                return false;
+        }
+        return beta_x1000 >= APP_FUSION_BETA_X1000_MIN && beta_x1000 <= APP_FUSION_BETA_X1000_MAX;
 }
 
 static bool dsp_params_valid(uint8_t axis, uint8_t window_idx)
@@ -112,6 +127,18 @@ int app_config_set_dsp(uint8_t axis, uint8_t window_idx, uint8_t enable_mask)
         s_cfg.dsp.axis = axis;
         s_cfg.dsp.window_idx = window_idx;
         s_cfg.dsp.enable_mask = enable_mask;
+        k_mutex_unlock(&s_cfg_lock);
+        return 0;
+}
+
+int app_config_set_fusion(fusion_mode_t mode, uint16_t beta_x1000)
+{
+        if (!fusion_valid(mode, beta_x1000)) {
+                return -EINVAL;
+        }
+        k_mutex_lock(&s_cfg_lock, K_FOREVER);
+        s_cfg.fusion_mode = mode;                        /* the sink reads both, */
+        s_cfg.fusion_beta_x1000 = beta_x1000;            /* so both change under one lock */
         k_mutex_unlock(&s_cfg_lock);
         return 0;
 }

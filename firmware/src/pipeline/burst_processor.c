@@ -2,7 +2,8 @@
  * watermark interrupt and calls the sinks for every sample. Owns: the thread,
  * its stack, the sink table. Runs on: one thread at priority 6; waits in
  * imu_fifo_wait() on the semaphore the INT1 ISR gives. INT2 (free-fall, tap,
- * motion) is a work item and never touches this thread. */
+ * motion) is a work item and never touches this thread. The cycle counter
+ * for the pass timing is started by main. */
 #include "pipeline/burst_processor.h"
 #include <errno.h>
 #include <zephyr/kernel.h>
@@ -54,11 +55,6 @@ static void burst_processor_thread_fn(void *p1, void *p2, void *p3)
 		k_thread_priority_get(k_current_get()), K_THREAD_STACK_SIZEOF(s_bp_stack),
 		s_sink_count);
 
-#ifdef CONFIG_TIMING_FUNCTIONS
-	timing_init();
-	timing_start();
-#endif
-
 	while (1) {
 		imu_fifo_wait();
 #ifdef CONFIG_TIMING_FUNCTIONS
@@ -99,8 +95,8 @@ int burst_processor_register_sink(burst_sink_fn fn)
 int burst_processor_init(void)
 {
 	k_thread_create(&s_bp_thread, s_bp_stack, K_THREAD_STACK_SIZEOF(s_bp_stack),
-			burst_processor_thread_fn, NULL, NULL, NULL, BURST_PROCESSOR_PRIORITY, 0,
-			K_NO_WAIT);
+			burst_processor_thread_fn, NULL, NULL, NULL, BURST_PROCESSOR_PRIORITY,
+			K_FP_REGS, K_NO_WAIT); /* the fusion sink computes in float */
 	k_thread_name_set(&s_bp_thread, "burst_proc");
 
 	return 0;

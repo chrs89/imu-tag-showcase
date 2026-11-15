@@ -13,9 +13,15 @@ target_sources(app PRIVATE
   src/imu/imu_ext.c
   src/imu/imu_fifo.c
   src/imu/fifo_decode.c
+  src/imu/mag_poll.c
+  src/imu/imu_calibration.c
+  src/imu/cal_fit.c
+  src/fusion/madgwick.c
+  src/fusion/orientation_service.c
   src/events/event_triggers.c
   src/pipeline/burst_processor.c
   src/pipeline/log_sink.c
+  src/pipeline/fusion_sink.c
   src/app/app_wq.c
   src/app/app_config.c
   src/app/app_state.c

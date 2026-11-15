@@ -10,6 +10,7 @@ static void restore_defaults(void *fixture)
         (void)app_config_set_ble_downsample(1);
         (void)app_config_set_acq_profile(ACQ_PROFILE_LIVE_REALTIME);
         (void)app_config_set_dsp(0, 0, 0);
+        (void)app_config_set_fusion(FUSION_MODE_9AXIS, 100);
 }
 
 ZTEST(app_config, test_defaults_match_board_file)
@@ -60,6 +61,29 @@ ZTEST(app_config, test_profiles_fit_the_watermark_register)
 	zassert_equal(app_config_set_acq_profile((acq_profile_t)32), -EINVAL);
 	app_config_snapshot(&cfg);
 	zassert_equal(cfg.acq_profile, 254);
+}
+
+ZTEST(app_config, test_fusion_defaults)
+{
+	app_config_t cfg;
+
+	app_config_snapshot(&cfg);
+	zassert_equal(cfg.fusion_mode, FUSION_MODE_9AXIS);
+	zassert_equal(cfg.fusion_beta_x1000, 100);
+}
+
+ZTEST(app_config, test_invalid_fusion_rejected_and_config_unchanged)
+{
+	app_config_t cfg;
+
+	zassert_equal(app_config_set_fusion(FUSION_MODE_6AXIS, 33), 0);
+
+	zassert_equal(app_config_set_fusion((fusion_mode_t)3, 100), -EINVAL);
+	zassert_equal(app_config_set_fusion(FUSION_MODE_9AXIS, 9), -EINVAL);
+	zassert_equal(app_config_set_fusion(FUSION_MODE_9AXIS, 1001), -EINVAL);
+	app_config_snapshot(&cfg);
+	zassert_equal(cfg.fusion_mode, FUSION_MODE_6AXIS);
+	zassert_equal(cfg.fusion_beta_x1000, 33);
 }
 
 ZTEST_SUITE(app_config, NULL, NULL, NULL, restore_defaults, NULL);

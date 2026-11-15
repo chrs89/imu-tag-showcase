@@ -1,6 +1,9 @@
 #include "status/stats.h"
 #include "app/app_wq.h"
+#include "fusion/orientation_service.h"
 #include "imu/imu_fifo.h"
+#include "imu/mag_poll.h"
+#include "pipeline/fusion_sink.h"
 #include "pipeline/burst_processor.h"
 #include "pipeline/log_sink.h"
 #include <zephyr/logging/log.h>
@@ -55,8 +58,43 @@ static void log_acquisition(void)
 	LOG_INF("burst pass: last %u ns, max %u ns", last_ns, max_ns);
 #endif
 }
+
+/* Bench lines of the orientation path. Floats are printed as scaled integers:
+ * a float argument of a format string would be promoted to double. */
+static void log_fusion(void)
+{
+	struct fusion_sink_stats fs;
+	struct mag_poll_stats ms;
+	imu_orientation_t o;
+	imu_mag_sample_t m;
+
+	orientation_service_get(&o);
+	fusion_sink_get_stats(&fs);
+	mag_poll_get_stats(&ms);
+	mag_poll_get(&m);
+
+	LOG_INF("quat x1000 w %d x %d y %d z %d, flags 0x%02x, updates %u, gaps %u, "
+		"mag rejected %u",
+		(int)(o.w * 1000.0f), (int)(o.x * 1000.0f), (int)(o.y * 1000.0f),
+		(int)(o.z * 1000.0f), o.flags, fs.updates, fs.gaps, fs.mag_rejected);
+	LOG_INF("mag: uT x10 %d %d %d, norm2 uT2 %d, valid %d, polls %u, errors %u, stuck %u, "
+		"turn z cdeg %d",
+		(int)(m.mag.x * 10.0f), (int)(m.mag.y * 10.0f), (int)(m.mag.z * 10.0f),
+		(int)(m.mag.x * m.mag.x + m.mag.y * m.mag.y + m.mag.z * m.mag.z), (int)m.valid,
+		ms.polls, ms.errors, ms.stuck, fusion_sink_turn_z_cdeg());
+#ifdef CONFIG_TIMING_FUNCTIONS
+	uint32_t min_ns, last_ns, max_ns;
+
+	fusion_sink_step_ns_take(&min_ns, &last_ns, &max_ns);
+	LOG_INF("fusion step: min %u ns, last %u ns, max %u ns", min_ns, last_ns, max_ns);
+#endif
+}
 #else
 static void log_acquisition(void)
+{
+}
+
+static void log_fusion(void)
 {
 }
 #endif
@@ -75,9 +113,8 @@ static void periodic_log_fn(struct k_work *work)
         static uint64_t s_last_cycles;
         timing_t t0, t1;
 
+        /* main started the cycle counter before any work item ran */
         if (!s_timing_ready) {
-                timing_init();
-                timing_start();
                 s_timing_ready = true;
                 LOG_INF("busy %d", k_work_busy_get(&self->dwork.work));
         } else {
@@ -108,6 +145,7 @@ static void periodic_log_fn(struct k_work *work)
 
         LOG_INF("int1 isr %u, bursts %u", imu_fifo_isr_count(), imu_fifo_burst_count());
         log_acquisition();
+        log_fusion();
 
 #ifdef CONFIG_TIMING_FUNCTIONS
         t1 = timing_counter_get();

@@ -26,9 +26,11 @@ this repository, and the SDK is cloned next to it, never inside it.
    accel and gyro batch data rate to the same value, then flush the FIFO
    (bypass then stream). Otherwise 480 and 960 Hz silently deliver 240 Hz data.
 3. **Sinks are O(1).** Functions registered with `burst_processor_register_sink()`
-   run on the acquisition thread for every sample. No sleeping, no `K_FOREVER`
-   waits except the documented mag-sample copy, no logging per sample, no FFT.
-   Heavy work goes to `dsp_worker` or a work item.
+   run on the acquisition thread for every sample. No sleeping, no mutex per
+   sample, no logging per sample, no FFT. A sink may take the configuration
+   snapshot on a discontinuity or a configuration change. Several words that
+   cross threads (magnetometer sample, calibration values, orientation result)
+   are copied under a spinlock. Heavy work goes to `dsp_worker` or a work item.
 4. **ISRs only mark the time and signal.** INT1 stores the edge time (one clock
    read, one atomic store) and gives a semaphore, INT2 submits a work item.
    Nothing else.
@@ -50,10 +52,11 @@ this repository, and the SDK is cloned next to it, never inside it.
    compare by unsigned difference. The time step for integration is the sample
    period (`1 / imu_odr_hz`), never a difference of timestamps. BLE packets
    carry Q1.15 scaled by the runtime full scale.
-10. **Watermark unit: unverified.** The binding and the observed 59 Hz batch rate
-    suggest one FIFO word (tag plus 6 bytes), so 8 words would be 4 accel+gyro
-    pairs. Until one bench measurement confirms it, no published latency figure
-    may depend on it. Replace this rule with the measured fact when known.
+10. **The FIFO watermark counts rows.** One row is a tag plus 6 bytes; one sample
+    is two rows (gyro and accel), so a watermark of 8 gives 4 samples per burst
+    (`M-09-0`). Watermarks are even and at most 254. The sensor runs slower than
+    the configured rate (`M-09-8`), so burst periods are measured, not computed
+    from the nominal rate: 17.0 ms at 240 Hz and watermark 8.
 
 ## Build and test
 
