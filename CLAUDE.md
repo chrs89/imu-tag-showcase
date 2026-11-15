@@ -50,7 +50,10 @@ this repository, and the SDK is cloned next to it, never inside it.
 9. **Units:** accel in m/s2, gyro in rad/s, mag in uT. Sample timestamps are
    microseconds of MCU uptime in 32 bits; they wrap every 71.6 minutes, so
    compare by unsigned difference. The time step for integration is the sample
-   period (`1 / imu_odr_hz`), never a difference of timestamps. BLE packets
+   period, never a difference of timestamps. The period comes from
+   `imu_ext_rate_mhz()`, the rate the sensor really delivers (nominal rate
+   corrected by the sensor's own calibration register, about 2 % slow on the
+   prototype); `app_config.imu_odr_hz` is the nominal setting only. BLE packets
    carry Q1.15 scaled by the runtime full scale.
 10. **The FIFO watermark counts rows.** One row is a tag plus 6 bytes; one sample
     is two rows (gyro and accel), so a watermark of 8 gives 4 samples per burst

@@ -19,7 +19,8 @@
 struct fifo_decode_cfg {
 	float accel_scale; /* m/s2 per LSB, from fifo_accel_scale() */
 	float gyro_scale;  /* rad/s per LSB */
-	uint16_t odr_hz;   /* sample rate; sets the period between timestamps */
+	uint32_t rate_mhz; /* sample rate in millihertz, as the sensor delivers it
+			    * (imu_ext_rate_mhz()); sets the period between timestamps */
 };
 
 /* The one known point in time of a burst. */
@@ -41,7 +42,7 @@ typedef void (*fifo_sample_fn)(const imu_sample_t *s, void *user);
 /** Called from the burst thread, or from a test. Pairs the rows, scales them
  *  and calls @p on_sample once per sample, oldest first. Sample k gets
  *  anchor->ts_us plus (k - anchor->index) sample periods.
- *  @return number of samples passed to on_sample; 0 if cfg->odr_hz is 0. */
+ *  @return number of samples passed to on_sample; 0 if cfg->rate_mhz is 0. */
 size_t fifo_decode(const uint8_t *rows, uint16_t n_rows, const struct fifo_decode_cfg *cfg,
 		   const struct fifo_anchor *anchor, struct fifo_decode_state *st,
 		   fifo_sample_fn on_sample, void *user);

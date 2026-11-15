@@ -14,7 +14,7 @@ static struct fifo_decode_state s_st;
 static const struct fifo_decode_cfg s_cfg = {
 	.accel_scale = 1.0f,
 	.gyro_scale = 1.0f,
-	.odr_hz = 960,
+	.rate_mhz = 960000,
 };
 
 static void collect(const imu_sample_t *s, void *user)
@@ -160,6 +160,25 @@ ZTEST(fifo_decode, test_discontinuity_marks_first_sample)
 	zassert_false(s_st.mark_next);
 }
 
+/* (g) the period follows the rate the sensor delivers: 234.696 Hz is a
+ * nominal 240 Hz with the rate calibration at -17 steps; one period is
+ * 4260.8 us, and 126 periods are 536865 us, not the nominal 525000. */
+ZTEST(fifo_decode, test_period_from_delivered_rate)
+{
+	const struct fifo_anchor anchor = {.ts_us = 10000u, .index = 1};
+	const struct fifo_decode_cfg cfg = {
+		.accel_scale = 1.0f,
+		.gyro_scale = 1.0f,
+		.rate_mhz = 234696,
+	};
+
+	fill_pairs(3, true);
+	zassert_equal(fifo_decode(s_rows, 6, &cfg, &anchor, &s_st, collect, NULL), 3);
+	zassert_equal(s_out[0].timestamp_us, 5739u);
+	zassert_equal(s_out[1].timestamp_us, 10000u);
+	zassert_equal(s_out[2].timestamp_us, 14261u);
+}
+
 /* (f) scale factors: 70 mdps per LSB for the gyro, the accel table, and
  * signed little-endian unpacking. */
 ZTEST(fifo_decode, test_scale_factors)
@@ -168,7 +187,7 @@ ZTEST(fifo_decode, test_scale_factors)
 	const struct fifo_decode_cfg cfg = {
 		.accel_scale = fifo_accel_scale(2),
 		.gyro_scale = FIFO_GYRO_SCALE_2000DPS,
-		.odr_hz = 240,
+		.rate_mhz = 240000,
 	};
 
 	put_row(s_rows, 0, TAG_GYRO, 1000, -1000, 0);

@@ -9,6 +9,7 @@
 #include "fusion/madgwick.h"
 #include <errno.h>
 #include <math.h>
+#include <stdbool.h>
 
 /* helpers: trust the caller */
 
@@ -33,6 +34,97 @@ void madgwick_reset(madgwick_t *f)
 	f->q1 = 0.0f;
 	f->q2 = 0.0f;
 	f->q3 = 0.0f;
+}
+
+int madgwick_align(madgwick_t *f, float ux, float uy, float uz, float mx, float my, float mz)
+{
+	const float inv_u = inv_sqrt(ux * ux + uy * uy + uz * uz);
+
+	if (!(inv_u > 0.0f)) {
+		return -EINVAL;
+	}
+	ux *= inv_u;
+	uy *= inv_u;
+	uz *= inv_u;
+
+	/* North in the body frame: the horizontal part of the field. */
+	const float m2 = mx * mx + my * my + mz * mz;
+	const float d = mx * ux + my * uy + mz * uz;
+	float nx = mx - d * ux, ny = my - d * uy, nz = mz - d * uz;
+	const float n2 = nx * nx + ny * ny + nz * nz;
+
+	/* No field, or a field within about 0.6 degrees of vertical, gives no
+	 * heading: take the horizontal part of body x, or of body y when x is
+	 * closer to vertical. */
+	if (!(n2 > 1e-4f * m2) || !isfinite(n2)) {
+		const bool x_vertical = ux * ux > 0.5f;
+		const float e = x_vertical ? uy : ux;
+
+		nx = (x_vertical ? 0.0f : 1.0f) - e * ux;
+		ny = (x_vertical ? 1.0f : 0.0f) - e * uy;
+		nz = -e * uz;
+	}
+
+	const float inv_n = inv_sqrt(nx * nx + ny * ny + nz * nz);
+
+	nx *= inv_n;
+	ny *= inv_n;
+	nz *= inv_n;
+
+	/* West completes the right-handed frame: up cross north. */
+	const float wx = uy * nz - uz * ny;
+	const float wy = uz * nx - ux * nz;
+	const float wz = ux * ny - uy * nx;
+
+	/* The rows of the body-to-earth matrix are north, west and up in body
+	 * coordinates. Matrix to quaternion, largest component first, so the
+	 * divisor is never small. */
+	const float tr = nx + wy + uz;
+	float q0, q1, q2, q3;
+
+	if (tr > 0.0f) {
+		const float s = 2.0f * sqrtf(tr + 1.0f);
+
+		q0 = 0.25f * s;
+		q1 = (uy - wz) / s;
+		q2 = (nz - ux) / s;
+		q3 = (wx - ny) / s;
+	} else if (nx > wy && nx > uz) {
+		const float s = 2.0f * sqrtf(1.0f + nx - wy - uz);
+
+		q0 = (uy - wz) / s;
+		q1 = 0.25f * s;
+		q2 = (ny + wx) / s;
+		q3 = (nz + ux) / s;
+	} else if (wy > uz) {
+		const float s = 2.0f * sqrtf(1.0f + wy - nx - uz);
+
+		q0 = (nz - ux) / s;
+		q1 = (ny + wx) / s;
+		q2 = 0.25f * s;
+		q3 = (wz + uy) / s;
+	} else {
+		const float s = 2.0f * sqrtf(1.0f + uz - nx - wy);
+
+		q0 = (wx - ny) / s;
+		q1 = (nz + ux) / s;
+		q2 = (wz + uy) / s;
+		q3 = 0.25f * s;
+	}
+
+	const float inv_q = inv_sqrt(q0 * q0 + q1 * q1 + q2 * q2 + q3 * q3);
+
+	if (!(inv_q > 0.0f)) {
+		return -EINVAL;
+	}
+	/* q and -q are the same rotation: keep w positive */
+	const float sign = (q0 < 0.0f) ? -inv_q : inv_q;
+
+	f->q0 = q0 * sign;
+	f->q1 = q1 * sign;
+	f->q2 = q2 * sign;
+	f->q3 = q3 * sign;
+	return 0;
 }
 
 int madgwick_update_6axis(madgwick_t *f, float gx, float gy, float gz, float ax, float ay,

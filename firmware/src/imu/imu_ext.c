@@ -22,6 +22,7 @@ LOG_MODULE_REGISTER(imu_ext, LOG_LEVEL_INF); /* Later: CONFIG_IMU_TAG_LOG_LEVEL,
 /* static state */
 static const struct spi_dt_spec s_spi = SPI_DT_SPEC_GET(DT_ALIAS(imu0), IMU_SPI_OP);
 static K_MUTEX_DEFINE(s_imu_lock);
+static int8_t s_odr_cal;  /* steps of 0.13 %; written once at boot, before the threads */
 static size_t s_rate_idx; /* row of s_rates in force; written under s_imu_lock */
 
 /* Output rate and FIFO batch rate always change together (CLAUDE.md rule 2). */
@@ -141,6 +142,7 @@ int imu_ext_init(void)
 
 	k_mutex_lock(&s_imu_lock, K_FOREVER);
 	rc = lsm6dsv16x_device_id_get(&s_ctx, &id);
+	rc = (rc != 0) ? rc : lsm6dsv16x_odr_cal_reg_get(&s_ctx, &s_odr_cal);
 	k_mutex_unlock(&s_imu_lock);
 
 	if (rc != 0) {
@@ -149,8 +151,19 @@ int imu_ext_init(void)
 	if (id != LSM6DSV16X_ID) {
 		return -ENODEV;
 	}
-	LOG_INF("imu_ext: WHO_AM_I 0x%02x", id);
+	LOG_INF("imu_ext: WHO_AM_I 0x%02x, odr cal %d steps of 0.13 %%", id, s_odr_cal);
 	return 0;
+}
+
+int8_t imu_ext_odr_cal(void)
+{
+	return s_odr_cal;
+}
+
+uint32_t imu_ext_rate_mhz(uint16_t odr_hz)
+{
+	/* 0.13 % of odr_hz * 1000 mHz is odr_hz * 13 / 10 per step */
+	return (uint32_t)((int32_t)odr_hz * 1000 + (int32_t)odr_hz * 13 * s_odr_cal / 10);
 }
 
 int imu_ext_set_odr(uint16_t odr_hz)

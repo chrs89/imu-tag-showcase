@@ -18,6 +18,7 @@ struct imu_fifo_stats {
 	uint32_t isr_count;        /* INT1 edges seen */
 	uint32_t bursts;           /* bursts decoded */
 	uint32_t samples;          /* samples passed to the sinks */
+	uint32_t settle_dropped;   /* samples dropped while the sensor settled after the start */
 	uint32_t level_max;        /* highest FIFO level at a status read; 511 minus this is the margin */
 	uint32_t overruns;         /* bursts with a sensor overrun or a clipped read */
 	uint32_t bus_errors;       /* bursts skipped after a bus error */
@@ -50,6 +51,14 @@ void imu_fifo_wait(void);
  *  picks the time anchor of the burst, decodes the rows and calls
  *  @p on_sample once per sample. */
 void imu_fifo_do_burst(fifo_sample_fn on_sample, void *user);
+
+#ifdef CONFIG_TIMING_FUNCTIONS
+/** Called from app_wq (stats item); bench instrument. Elapsed time of the
+ *  FIFO read of one burst (lock, status read, row read) in nanoseconds: the
+ *  last burst and the longest so far. The rest of a burst pass is decode
+ *  and sinks. */
+void imu_fifo_read_ns(uint32_t *last_ns, uint32_t *max_ns);
+#endif
 
 /** Called from the burst thread; reads the INT1 pin, touches no kernel object.
  *  @return true while the FIFO still holds at least the watermark. */

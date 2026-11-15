@@ -22,6 +22,15 @@ void madgwick_init(madgwick_t *f, float beta);
 /** Called from any context; pure. Sets the identity quaternion, keeps the gain. */
 void madgwick_reset(madgwick_t *f);
 
+/** Called from the burst thread, or from a test. Pure. Sets q directly from
+ *  two body-frame vectors instead of converging to them: (ux, uy, uz) points
+ *  up (the accelerometer reading of a tag at rest, any length) and gives the
+ *  tilt; (mx, my, mz) is the magnetic field and gives the heading. A zero
+ *  field, or one parallel to up, gives the heading in which body x lies over
+ *  earth x. The gain is kept.
+ *  @return 0, or -EINVAL when the up vector is zero or not finite (q kept). */
+int madgwick_align(madgwick_t *f, float ux, float uy, float uz, float mx, float my, float mz);
+
 /** Called from the burst thread, or from a test. Pure. A zero accel vector
  *  gives a gyro-only step.
  *  @return 0, or -EINVAL when dt is not a positive finite number. */

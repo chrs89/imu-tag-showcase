@@ -42,6 +42,12 @@ int32_t fusion_sink_turn_z_cdeg(void);
  *  in nanoseconds since the last call: shortest, last, longest. All three
  *  are 0 when no step ran. Clears the shortest and the longest. */
 void fusion_sink_step_ns_take(uint32_t *min_ns, uint32_t *last_ns, uint32_t *max_ns);
+
+/** Called from app_wq (stats item); bench instrument for the unexplained
+ *  0 ns step readings.
+ *  @return how many steps measured 0 ns since boot; *first_update is the
+ *  update counter at the first of them. */
+uint32_t fusion_sink_step_zero_count(uint32_t *first_update);
 #endif
 
 #endif /* PIPELINE_FUSION_SINK_H_ */

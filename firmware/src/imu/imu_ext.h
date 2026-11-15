@@ -16,6 +16,19 @@
  *  ID is not 0x70, -EIO on a bus error. */
 int imu_ext_init(void);
 
+/** Called from any thread after imu_ext_init(); no lock, the value is written
+ *  once at boot. The sensor's own figure for the deviation of its output rate
+ *  from nominal, in steps of 0.13 % (INTERNAL_FREQ_FINE); negative means the
+ *  sensor runs slow. */
+int8_t imu_ext_odr_cal(void);
+
+/** Called from any thread after imu_ext_init(); no lock, pure arithmetic on
+ *  the boot-time calibration value. The rate the sensor delivers for a
+ *  nominal rate, in millihertz: nominal times (1 + 0.0013 x odr cal). Use it
+ *  for every time step and timestamp period; app_config.imu_odr_hz stays the
+ *  nominal setting (docs/MEASUREMENTS.md M-09-8). */
+uint32_t imu_ext_rate_mhz(uint16_t odr_hz);
+
 /** Called from app_wq; takes s_imu_lock once. Puts the FIFO in bypass, sets
  *  the accel and gyro output rate and both FIFO batch rates to @p odr_hz,
  *  then returns the FIFO to the mode it was in. The bypass empties the FIFO:

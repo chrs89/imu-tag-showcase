@@ -19,8 +19,16 @@ void orientation_service_update(const imu_sample_t *s, const imu_vec3_t *gyro,
  *  out->flags has ORIENT_VALID once the first step has run. */
 void orientation_service_get(imu_orientation_t *out);
 
-/** Called from any thread; one atomic store. The burst thread sets the
- *  filter back to the identity at its next sample. */
+/** Called from any thread; one atomic store. The burst thread aligns the
+ *  filter again at its next sample: tilt from the accelerometer, heading
+ *  from the magnetometer when a usable sample exists, as after boot. */
 void orientation_service_request_reset(void);
+
+#ifdef CONFIG_IMU_TAG_DEBUG_COUNTERS
+/** Called from any thread; bench instrument. The burst thread sets the
+ *  filter to the identity at its next sample without aligning, so the
+ *  correction rate can be watched (docs/MEASUREMENTS.md M-10-5). */
+void orientation_service_request_identity(void);
+#endif
 
 #endif /* FUSION_ORIENTATION_SERVICE_H_ */

@@ -25,14 +25,23 @@ static void unpack(const uint8_t *row, int16_t v[3])
 	}
 }
 
+/* One sample period in microseconds as a 48.16 fixed-point number, rounded
+ * to nearest. The one 64-bit division of a burst: on the Cortex-M4 that is a
+ * library call, too slow to repeat for every sample. */
+static uint64_t period_q16_us(uint32_t rate_mhz)
+{
+	return ((1000000000ULL << 16) + rate_mhz / 2u) / rate_mhz;
+}
+
 /* n sample periods in microseconds, rounded to nearest; n may be negative.
  * Computed from the sample number, not accumulated, so the rounding of one
- * period does not add up over a burst. */
-static int32_t period_offset_us(int32_t n, uint16_t odr_hz)
+ * period does not add up over a burst. One multiplication and a shift. */
+static int32_t period_offset_us(int32_t n, uint64_t period_q16)
 {
-	const int32_t num = n * 1000000; /* |n| <= 255, fits in 32 bits */
+	const uint64_t mag = (uint64_t)(n < 0 ? -n : n) * period_q16 + (1u << 15);
+	const int32_t us = (int32_t)(mag >> 16);
 
-	return (num >= 0 ? num + odr_hz / 2 : num - odr_hz / 2) / odr_hz;
+	return n < 0 ? -us : us;
 }
 
 /* public API: validate at the boundary */
@@ -45,9 +54,11 @@ size_t fifo_decode(const uint8_t *rows, uint16_t n_rows, const struct fifo_decod
 	int16_t a[3] = {0}, g[3] = {0};
 	uint16_t k = 0;
 
-	if (cfg->odr_hz == 0u) {
+	if (cfg->rate_mhz == 0u) {
 		return 0;
 	}
+
+	const uint64_t period_q16 = period_q16_us(cfg->rate_mhz); /* once per burst */
 
 	for (uint16_t i = 0; i < n_rows; i++) {
 		const uint8_t *r = &rows[(size_t)i * FIFO_ROW_BYTES];
@@ -75,7 +86,7 @@ size_t fifo_decode(const uint8_t *rows, uint16_t n_rows, const struct fifo_decod
 			/* counted from the anchor sample: older negative, newer positive */
 			.timestamp_us = anchor->ts_us +
 					(uint32_t)period_offset_us((int32_t)k - (int32_t)anchor->index,
-								   cfg->odr_hz),
+								   period_q16),
 			.seq = st->seq++,
 			.flags = st->mark_next ? IMU_SAMPLE_DISCONTINUITY : 0u,
 		};

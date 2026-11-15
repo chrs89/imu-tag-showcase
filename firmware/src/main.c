@@ -17,6 +17,7 @@
 #include "imu/imu_ext.h"
 #include "imu/imu_fifo.h"
 #include "app/app_config.h"
+#include "fusion/orientation_service.h"
 #include "imu/imu_calibration.h"
 #include "imu/mag_poll.h"
 #include "pipeline/fusion_sink.h"
@@ -39,6 +40,127 @@ static void log_calibration(void)
                 (int)(c.mag_scale[0] * 1000.0f), (int)(c.mag_scale[1] * 1000.0f),
                 (int)(c.mag_scale[2] * 1000.0f));
 }
+
+/* ---- Temporary bench hook (wiki chapters 9 and 10). Off by default:
+ * BENCH_RUN_NONE compiles it out. It goes away when the command path of
+ * chapter 12 can trigger the same calls (docs/BACKLOG.md). ----
+ * Pick one run, build with debug.conf, flash, read the RTT log. The item runs
+ * on app_wq, the only context that may change the configuration; the blocker
+ * runs on the system work queue. Nothing happens before BENCH_START_S, so the
+ * first stats lines show an untouched boot. */
+#define BENCH_RUN_NONE        0
+#define BENCH_RUN_960HZ       1 /* 960 Hz at BENCH_START_S */
+#define BENCH_RUN_CAL         2 /* magnetometer run 30 s, save; gyro run at rest, save */
+#define BENCH_RUN_6AXIS       3 /* fusion 6-axis at BENCH_START_S */
+#define BENCH_RUN_RESET       4 /* filter to the identity at BENCH_START_S */
+#define BENCH_RUN_BLOCK_100MS 5 /* 960 Hz, then one 100 ms block on sysworkq */
+#define BENCH_RUN_BLOCK_600US 6 /* 960 Hz, then 600 us blocks every 7 ms on sysworkq */
+
+#ifndef BENCH_RUN
+#define BENCH_RUN BENCH_RUN_NONE
+#endif
+#define BENCH_START_S 20
+
+#if BENCH_RUN != BENCH_RUN_NONE
+static void bench_fn(struct k_work *work);
+static K_WORK_DELAYABLE_DEFINE(s_bench, bench_fn);
+
+#define BENCH_AT_960                                                                              \
+	(BENCH_RUN == BENCH_RUN_960HZ || BENCH_RUN == BENCH_RUN_BLOCK_100MS ||                    \
+	 BENCH_RUN == BENCH_RUN_BLOCK_600US)
+
+#if BENCH_AT_960
+static void bench_go_960(void)
+{
+        int rc = app_config_set_imu(960, 2);
+
+        rc = (rc != 0) ? rc : imu_ext_set_odr(960);
+        imu_fifo_mark_discontinuity();
+        LOG_INF("bench: 960 Hz, rc %d", rc);
+}
+#endif
+
+#if BENCH_RUN == BENCH_RUN_BLOCK_100MS || BENCH_RUN == BENCH_RUN_BLOCK_600US
+static void bench_block_fn(struct k_work *work);
+static K_WORK_DELAYABLE_DEFINE(s_bench_block, bench_block_fn);
+
+/* Runs on the system work queue (cooperative): holds every thread off. */
+static void bench_block_fn(struct k_work *work)
+{
+        ARG_UNUSED(work);
+#if BENCH_RUN == BENCH_RUN_BLOCK_100MS
+        k_busy_wait(100000);
+        LOG_INF("bench: 100 ms block done");
+#else
+        k_busy_wait(600);
+        k_work_schedule(&s_bench_block, K_MSEC(7));
+#endif
+}
+#endif
+
+/* Runs on app_wq. step counts the calls; each case arms the next one. */
+static void bench_fn(struct k_work *work)
+{
+        static int step;
+        int next_s = 0;
+
+        ARG_UNUSED(work);
+#if BENCH_RUN == BENCH_RUN_960HZ
+        if (step == 0) {
+                bench_go_960();
+        }
+#elif BENCH_RUN == BENCH_RUN_BLOCK_100MS || BENCH_RUN == BENCH_RUN_BLOCK_600US
+        if (step == 0) {
+                bench_go_960();
+                next_s = 20;
+        } else if (step == 1) {
+                LOG_INF("bench: blocker starts");
+                k_work_schedule(&s_bench_block, K_NO_WAIT);
+        }
+#elif BENCH_RUN == BENCH_RUN_CAL
+        int rc;
+
+        if (step == 0) {
+                imu_cal_mag_start();
+                LOG_INF("bench: mag run started, turn the tag through all orientations for 30 s");
+                next_s = 30;
+        } else if (step == 1) {
+                rc = imu_cal_mag_finish();
+                LOG_INF("bench: mag finish rc %d", rc);
+                rc = imu_cal_mag_save();
+                LOG_INF("bench: mag save rc %d; put the tag down, gyro run in 10 s", rc);
+                next_s = 10;
+        } else if (step == 2) {
+                imu_cal_gyro_start();
+                LOG_INF("bench: gyro run started, keep the tag at rest");
+                next_s = 3;
+        } else if (step == 3) {
+                rc = imu_cal_gyro_save();
+                LOG_INF("bench: gyro state %d (2 done, 3 moved), save rc %d",
+                        (int)imu_cal_gyro_state(), rc);
+                log_calibration();
+        }
+#elif BENCH_RUN == BENCH_RUN_6AXIS
+        if (step == 0) {
+                const int rc = app_config_set_fusion(FUSION_MODE_6AXIS, 100);
+
+                fusion_sink_config_changed();
+                LOG_INF("bench: fusion 6-axis, rc %d", rc);
+        }
+#elif BENCH_RUN == BENCH_RUN_RESET
+        if (step == 0) {
+                /* identity, not a re-alignment: the correction rate shows (M-10-5) */
+                orientation_service_request_identity();
+                LOG_INF("bench: filter set to the identity");
+        }
+#endif
+        step++;
+        if (next_s > 0) {
+                k_work_schedule_for_queue(app_wq_get(), &s_bench, K_SECONDS(next_s));
+        }
+}
+#endif /* BENCH_RUN != BENCH_RUN_NONE */
+/* ---- end of the temporary bench hook ---- */
 
 /* Main thread. Logs version and reset cause, starts the modules, then idles.
  * stas.c logs the counters every 5000 ms */
@@ -114,10 +236,20 @@ int main(void)
                 LOG_INF("imu_fifo_init returned 0");
         }
 
+#if BENCH_RUN != BENCH_RUN_NONE
+        LOG_WRN("bench run %d armed, starts at %d s", BENCH_RUN, BENCH_START_S);
+        k_work_schedule_for_queue(app_wq_get(), &s_bench, K_SECONDS(BENCH_START_S));
+#endif
+
 #ifdef CONFIG_THREAD_ANALYZER
         /* Debug build only (-DEXTRA_CONF_FILE=debug.conf): stack baseline, chapter 3. */
         k_sleep(K_SECONDS(5));
         thread_analyzer_print(0);
+#if BENCH_RUN != BENCH_RUN_NONE
+        /* Temporary, with the bench hook: stacks again once the run has settled. */
+        k_sleep(K_SECONDS(BENCH_START_S + 55));
+        thread_analyzer_print(0);
+#endif
 #endif
 
 

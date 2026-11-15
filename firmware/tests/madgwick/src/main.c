@@ -159,4 +159,69 @@ ZTEST(madgwick, test_foreign_field_leaks_into_yaw_only)
 	zassert_within(f.q3, -0.316f, 0.01f, "q3 %d e-6", (int)(f.q3 * 1e6f));
 }
 
+/* (h) Alignment from gravity alone gives the tilt at once: 30 degrees about
+ * x, heading with body x over earth x. */
+ZTEST(madgwick, test_align_tilt_from_gravity)
+{
+	madgwick_t f;
+
+	madgwick_init(&f, BETA);
+	zassert_ok(madgwick_align(&f, 0.0f, 4.9033f, 8.4928f, 0.0f, 0.0f, 0.0f));
+	expect_q(&f, 0.96593f, 0.25882f, 0.0f, 0.0f, 1e-4f);
+	zassert_equal(f.beta, BETA);
+}
+
+/* (i) Alignment with the field gives the heading at once: the orientations
+ * cases (e) and (g) need 15 s and 30 s to reach. */
+ZTEST(madgwick, test_align_heading_from_field)
+{
+	madgwick_t f;
+
+	madgwick_init(&f, BETA);
+	zassert_ok(madgwick_align(&f, 0.0f, 0.0f, G, 0.0f, -20.0f, -43.0f));
+	expect_q(&f, 0.70711f, 0.0f, 0.0f, 0.70711f, 1e-4f);
+
+	zassert_ok(madgwick_align(&f, 0.0f, 0.0f, G, 20.0f, 15.0f, -43.0f));
+	expect_q(&f, 0.94868f, 0.0f, 0.0f, -0.31623f, 1e-4f);
+}
+
+/* (j) The aligned orientation is where the filter rests: tilted tag, skew
+ * field, no rotation. Two seconds of 9-axis steps do not move it. */
+ZTEST(madgwick, test_align_is_the_resting_point)
+{
+	madgwick_t f, start;
+
+	madgwick_init(&f, BETA);
+	zassert_ok(madgwick_align(&f, 1.2f, 4.9033f, 8.4f, 10.0f, -30.0f, -25.0f));
+	start = f;
+	zassert_within(f.q0 * f.q0 + f.q1 * f.q1 + f.q2 * f.q2 + f.q3 * f.q3, 1.0f, 1e-5f);
+
+	for (int i = 0; i < 480; i++) {
+		zassert_ok(madgwick_update_9axis(&f, 0.0f, 0.0f, 0.0f, 1.2f, 4.9033f, 8.4f, 10.0f,
+						 -30.0f, -25.0f, DT));
+	}
+	expect_q(&f, start.q0, start.q1, start.q2, start.q3, 0.002f);
+}
+
+/* (k) Degenerate inputs: no up vector is refused; a vertical field gives no
+ * heading and body x stays over earth x; body x straight up still gives a
+ * unit quaternion whose predicted gravity is the measured one. */
+ZTEST(madgwick, test_align_degenerate_inputs)
+{
+	madgwick_t f = {.q0 = 0.5f, .q1 = 0.5f, .q2 = 0.5f, .q3 = 0.5f, .beta = BETA};
+
+	zassert_equal(madgwick_align(&f, 0.0f, 0.0f, 0.0f, 20.0f, 0.0f, -43.0f), -EINVAL);
+	zassert_equal(madgwick_align(&f, NAN, 0.0f, G, 20.0f, 0.0f, -43.0f), -EINVAL);
+	zassert_equal(f.q0, 0.5f);
+	zassert_equal(f.q3, 0.5f);
+
+	zassert_ok(madgwick_align(&f, 0.0f, 0.0f, G, 0.0f, 0.0f, -40.0f));
+	expect_q(&f, 1.0f, 0.0f, 0.0f, 0.0f, 1e-5f);
+
+	zassert_ok(madgwick_align(&f, G, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f));
+	zassert_within(f.q0 * f.q0 + f.q1 * f.q1 + f.q2 * f.q2 + f.q3 * f.q3, 1.0f, 1e-5f);
+	zassert_within(2.0f * (f.q1 * f.q3 - f.q0 * f.q2), 1.0f, 1e-5f);
+	zassert_true(f.q0 >= 0.0f);
+}
+
 ZTEST_SUITE(madgwick, NULL, NULL, NULL, NULL, NULL);

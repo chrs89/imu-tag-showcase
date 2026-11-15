@@ -14,6 +14,7 @@
 #include "app/app_config.h"
 #include "fusion/orientation_service.h"
 #include "imu/imu_calibration.h"
+#include "imu/imu_ext.h"
 #include "imu/mag_poll.h"
 
 #define MAG_MAX_AGE_US 300000          /* three missed polls */
@@ -38,6 +39,8 @@ static atomic_t s_turn_z_cdeg;
 static atomic_t s_step_min_ns = ATOMIC_INIT(INT32_MAX);
 static atomic_t s_step_last_ns;
 static atomic_t s_step_max_ns;
+static atomic_t s_step_zeros;
+static atomic_t s_step_zero_first;
 #endif
 
 /* public API */
@@ -57,7 +60,8 @@ void fusion_sink(const imu_sample_t *s)
 		/* before the copy: a change after it sets the flag again */
 		atomic_set(&s_cfg_dirty, 0);
 		app_config_snapshot(&cfg);
-		s_dt = 1.0f / (float)cfg.imu_odr_hz;
+		/* the period the sensor really delivers, not the nominal one */
+		s_dt = 1000.0f / (float)imu_ext_rate_mhz(cfg.imu_odr_hz);
 		s_beta = (float)cfg.fusion_beta_x1000 * 0.001f;
 		s_mode = (uint8_t)cfg.fusion_mode;
 	}
@@ -104,12 +108,21 @@ void fusion_sink(const imu_sample_t *s)
 	timing_t t1 = timing_counter_get();
 	const atomic_val_t ns = (atomic_val_t)timing_cycles_to_ns(timing_cycles_get(&t0, &t1));
 
-	atomic_set(&s_step_last_ns, ns);
-	if (ns < atomic_get(&s_step_min_ns)) {
-		atomic_set(&s_step_min_ns, ns);
-	}
-	if (ns > atomic_get(&s_step_max_ns)) {
-		atomic_set(&s_step_max_ns, ns);
+	if (ns == 0) {
+		/* The cycle counter did not move during the step. Seen in a
+		 * block of steps early after boot; unverified cause: the debug
+		 * probe attaching. Counted, and kept out of the figures. */
+		if (atomic_inc(&s_step_zeros) == 0) {
+			atomic_set(&s_step_zero_first, atomic_get(&s_updates));
+		}
+	} else {
+		atomic_set(&s_step_last_ns, ns);
+		if (ns < atomic_get(&s_step_min_ns)) {
+			atomic_set(&s_step_min_ns, ns);
+		}
+		if (ns > atomic_get(&s_step_max_ns)) {
+			atomic_set(&s_step_max_ns, ns);
+		}
 	}
 #endif
 	atomic_inc(&s_updates);
@@ -135,6 +148,12 @@ int32_t fusion_sink_turn_z_cdeg(void)
 #endif
 
 #ifdef CONFIG_TIMING_FUNCTIONS
+uint32_t fusion_sink_step_zero_count(uint32_t *first_update)
+{
+	*first_update = (uint32_t)atomic_get(&s_step_zero_first);
+	return (uint32_t)atomic_get(&s_step_zeros);
+}
+
 void fusion_sink_step_ns_take(uint32_t *min_ns, uint32_t *last_ns, uint32_t *max_ns)
 {
 	const atomic_val_t min = atomic_set(&s_step_min_ns, INT32_MAX);

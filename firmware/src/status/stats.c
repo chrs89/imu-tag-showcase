@@ -28,9 +28,9 @@ static void log_acquisition(void)
 
 	imu_fifo_get_stats(&st);
 	LOG_INF("fifo: samples %u at tick %u, level max %u, overruns %u, orphans %u, "
-		"unknown tags %u, bus errors %u, anchor fallbacks %u",
+		"unknown tags %u, bus errors %u, anchor fallbacks %u, settle dropped %u",
 		st.samples, (uint32_t)k_uptime_ticks(), st.level_max, st.overruns, st.orphans,
-		st.unknown_tags, st.bus_errors, st.anchor_fallbacks);
+		st.unknown_tags, st.bus_errors, st.anchor_fallbacks, st.settle_dropped);
 
 	if (log_sink_latest(&s) != 0u) {
 		LOG_INF("sink: discontinuities %u, last seq %u ts %u us, accel mm/s2 %d %d %d, "
@@ -54,8 +54,12 @@ static void log_acquisition(void)
 #ifdef CONFIG_TIMING_FUNCTIONS
 	uint32_t last_ns, max_ns;
 
+	uint32_t read_last_ns, read_max_ns;
+
 	burst_processor_pass_ns(&last_ns, &max_ns);
-	LOG_INF("burst pass: last %u ns, max %u ns", last_ns, max_ns);
+	imu_fifo_read_ns(&read_last_ns, &read_max_ns);
+	LOG_INF("burst pass: last %u ns, max %u ns; of that fifo read: last %u ns, max %u ns",
+		last_ns, max_ns, read_last_ns, read_max_ns);
 #endif
 }
 
@@ -83,10 +87,12 @@ static void log_fusion(void)
 		(int)(m.mag.x * m.mag.x + m.mag.y * m.mag.y + m.mag.z * m.mag.z), (int)m.valid,
 		ms.polls, ms.errors, ms.stuck, fusion_sink_turn_z_cdeg());
 #ifdef CONFIG_TIMING_FUNCTIONS
-	uint32_t min_ns, last_ns, max_ns;
+	uint32_t min_ns, last_ns, max_ns, zero_first;
 
 	fusion_sink_step_ns_take(&min_ns, &last_ns, &max_ns);
-	LOG_INF("fusion step: min %u ns, last %u ns, max %u ns", min_ns, last_ns, max_ns);
+	LOG_INF("fusion step: min %u ns, last %u ns, max %u ns, zero readings %u (first at "
+		"update %u)",
+		min_ns, last_ns, max_ns, fusion_sink_step_zero_count(&zero_first), zero_first);
 #endif
 }
 #else

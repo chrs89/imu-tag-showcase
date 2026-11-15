@@ -8,6 +8,9 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/atomic.h>
+#ifdef CONFIG_TIMING_FUNCTIONS
+#include <zephyr/timing/timing.h>
+#endif
 #include "app/app_config.h"
 #include "imu/imu_ext.h"
 
@@ -18,6 +21,12 @@ LOG_MODULE_REGISTER(imu_fifo, LOG_LEVEL_INF); /* Later: CONFIG_IMU_TAG_LOG_LEVEL
 /* The whole FIFO in whole pairs: the level is 9 bits, 511 rows at most. */
 #define FIFO_BUF_ROWS 510u
 #define FIFO_WM_MAX   254u
+/* Settling time after the FIFO start, when accel and gyro leave power-down.
+ * The first debug runs showed about 0.8 degrees of z turn from the first
+ * samples with the tag at rest. The duration is a choice, unverified: check
+ * "turn z cdeg" in the first stats line after a change. A rate change while
+ * running showed no such effect. */
+#define FIFO_SETTLE_MS 100
 
 /* static state */
 static K_SEM_DEFINE(s_fifo_sem, 0, 1);
@@ -28,6 +37,12 @@ static atomic_t s_edge_ticks; /* low 32 bits of k_uptime_ticks() at the last INT
 static atomic_t s_edge_fresh; /* 1: an edge occurred that no burst has used yet */
 static atomic_t s_wm_rows;    /* watermark in force */
 static atomic_t s_mark_pending;
+static atomic_t s_settle_pairs;   /* samples still to drop after the FIFO start */
+static atomic_t s_settle_dropped; /* samples dropped so far */
+#ifdef CONFIG_TIMING_FUNCTIONS
+static atomic_t s_read_last_ns;
+static atomic_t s_read_max_ns;
+#endif
 
 static uint8_t s_rows[FIFO_BUF_ROWS * FIFO_ROW_BYTES]; /* burst thread only */
 static struct fifo_decode_state s_dec;                 /* burst thread only */
@@ -81,10 +96,11 @@ static bool watermark_valid(uint16_t rows)
 /* Bench instrument: the status-read anchor against the edge anchor for the
  * same sample, in ticks. */
 static void anchor_stats_add(uint32_t edge, uint32_t status, uint16_t pairs, uint16_t edge_idx,
-			     uint16_t odr_hz)
+			     uint32_t rate_mhz)
 {
 	const int32_t periods = (int32_t)pairs - 1 - (int32_t)edge_idx;
-	const int32_t span = (periods * CONFIG_SYS_CLOCK_TICKS_PER_SEC + odr_hz / 2) / odr_hz;
+	const int32_t span = (int32_t)(((int64_t)periods * CONFIG_SYS_CLOCK_TICKS_PER_SEC * 1000 +
+					rate_mhz / 2) / rate_mhz);
 	const int32_t d = (int32_t)(status - edge) - span;
 	unsigned int bin = 0;
 
@@ -111,6 +127,7 @@ static void anchor_stats_add(uint32_t edge, uint32_t status, uint16_t pairs, uin
 
 int imu_fifo_init(uint16_t watermark_rows)
 {
+	app_config_t cfg;
 	int rc;
 
 	if (!watermark_valid(watermark_rows)) {
@@ -133,6 +150,10 @@ int imu_fifo_init(uint16_t watermark_rows)
 	if (rc != 0) {
 		return rc;
 	}
+
+	/* Before the start: the burst thread reads it at the first burst. */
+	app_config_snapshot(&cfg);
+	atomic_set(&s_settle_pairs, (FIFO_SETTLE_MS * cfg.imu_odr_hz + 999) / 1000);
 
 	rc = imu_ext_fifo_start((uint8_t)watermark_rows);
 	if (rc != 0) {
@@ -183,7 +204,23 @@ void imu_fifo_do_burst(fifo_sample_fn on_sample, void *user)
 	const uint16_t wm = (uint16_t)atomic_get(&s_wm_rows);
 	const uint16_t edge_idx = (uint16_t)(wm / 2u - 1u);
 
+#ifdef CONFIG_TIMING_FUNCTIONS
+	timing_t r0 = timing_counter_get();
+#endif
 	const int rows = imu_ext_fifo_read(s_rows, FIFO_BUF_ROWS, &info);
+#ifdef CONFIG_TIMING_FUNCTIONS
+	timing_t r1 = timing_counter_get();
+	const atomic_val_t read_ns =
+		(atomic_val_t)timing_cycles_to_ns(timing_cycles_get(&r0, &r1));
+
+	/* Bench instrument: the bus part of a burst pass (lock, status read,
+	 * row read). The thread sleeps during the transfers, so this is elapsed
+	 * time, not CPU time. */
+	atomic_set(&s_read_last_ns, read_ns);
+	if (read_ns > atomic_get(&s_read_max_ns)) {
+		atomic_set(&s_read_max_ns, read_ns);
+	}
+#endif
 
 	if (rows < 0) {
 		atomic_inc(&s_bus_errors);
@@ -205,14 +242,27 @@ void imu_fifo_do_burst(fifo_sample_fn on_sample, void *user)
 
 	const uint16_t pairs = (uint16_t)rows / 2u;
 
+	/* The first samples after the sensor leaves power-down are not valid
+	 * yet: drop whole bursts until the settling time is over. */
+	const uint16_t settle = (uint16_t)atomic_get(&s_settle_pairs);
+
+	if (settle > 0u) {
+		atomic_set(&s_settle_pairs, settle - MIN(settle, pairs));
+		atomic_add(&s_settle_dropped, pairs);
+		s_dec.mark_next = true; /* the first sample that passes has no predecessor */
+		atomic_inc(&s_burst_count);
+		return;
+	}
+
 	app_config_snapshot(&cfg); /* once per burst */
+	const uint32_t rate_mhz = imu_ext_rate_mhz(cfg.imu_odr_hz);
 
 	/* After an overrun or a flush, row watermark - 1 of the buffer is no
 	 * longer the row that raised the pin. */
 	if (fresh && !s_dec.mark_next && pairs > edge_idx) {
 		anchor = (struct fifo_anchor){.ts_us = ticks32_to_us(edge), .index = edge_idx};
 #ifdef CONFIG_IMU_TAG_DEBUG_COUNTERS
-		anchor_stats_add(edge, info.status_ticks, pairs, edge_idx, cfg.imu_odr_hz);
+		anchor_stats_add(edge, info.status_ticks, pairs, edge_idx, rate_mhz);
 #endif
 	} else {
 		anchor = (struct fifo_anchor){.ts_us = ticks32_to_us(info.status_ticks),
@@ -223,7 +273,7 @@ void imu_fifo_do_burst(fifo_sample_fn on_sample, void *user)
 	const struct fifo_decode_cfg dc = {
 		.accel_scale = fifo_accel_scale(cfg.accel_range_g),
 		.gyro_scale = FIFO_GYRO_SCALE_2000DPS,
-		.odr_hz = cfg.imu_odr_hz,
+		.rate_mhz = rate_mhz,
 	};
 	const size_t n = fifo_decode(s_rows, (uint16_t)rows, &dc, &anchor, &s_dec, on_sample, user);
 
@@ -232,6 +282,14 @@ void imu_fifo_do_burst(fifo_sample_fn on_sample, void *user)
 	atomic_set(&s_unknown_tags, (atomic_val_t)s_dec.unknown_tags);
 	atomic_inc(&s_burst_count);
 }
+
+#ifdef CONFIG_TIMING_FUNCTIONS
+void imu_fifo_read_ns(uint32_t *last_ns, uint32_t *max_ns)
+{
+	*last_ns = (uint32_t)atomic_get(&s_read_last_ns);
+	*max_ns = (uint32_t)atomic_get(&s_read_max_ns);
+}
+#endif
 
 bool imu_fifo_int1_active(void)
 {
@@ -248,6 +306,7 @@ void imu_fifo_get_stats(struct imu_fifo_stats *out)
 	out->isr_count = (uint32_t)atomic_get(&s_isr_count);
 	out->bursts = (uint32_t)atomic_get(&s_burst_count);
 	out->samples = (uint32_t)atomic_get(&s_samples);
+	out->settle_dropped = (uint32_t)atomic_get(&s_settle_dropped);
 	out->level_max = (uint32_t)atomic_get(&s_level_max);
 	out->overruns = (uint32_t)atomic_get(&s_overruns);
 	out->bus_errors = (uint32_t)atomic_get(&s_bus_errors);
