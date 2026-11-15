@@ -36,12 +36,46 @@ section "Release blockers".
 - INT1 counters at 240 Hz and 960 Hz (chapter 4 task 4): pending chapter 9,
   when the FIFO is configured; `s_isr_count` and `s_burst_count` must track
   each other within one.
-- hardware FPU (chapters 10 and 11): the build does not set `CONFIG_FPU`,
-  so float arithmetic runs as software calls. Enable `CONFIG_FPU` and
-  `CONFIG_FPU_SHARING` before the first float sink runs on `burst_proc`
-  (fusion, chapter 10), add `CONFIG_CMSIS_DSP` with the FFT (chapter 11),
-  then re-measure thread stacks and name the FPU setting in every timing
+- hardware FPU (chapters 10 and 11): `CONFIG_FPU` and `CONFIG_FPU_SHARING`
+  are on since chapter 10 and `burst_proc` is created with `K_FP_REGS`.
+  Open: add `CONFIG_CMSIS_DSP` with the FFT (chapter 11), re-measure the
+  thread stacks on the bench, and name the FPU setting in every timing
   entry.
+- partition map moved (chapters 10 and 16): enabling settings added the
+  Partition Manager partition `settings_storage` at the end of internal
+  flash and shrank both image slots by one page each. Expected, and the
+  reason the map must be frozen in `firmware/pm_static.yml` before any
+  release (release blocker above).
+- sample rate against nominal (chapters 9 and 10): the first debug run on
+  the prototype delivers fewer samples per second than the configured
+  rate, while the filter takes dt as `1 / imu_odr_hz`. Record the figure
+  as `M-09-8`, then decide: accept the angle error, or correct dt with a
+  measured rate. Take `M-09-8` before the gyro scale check `M-10-2`.
+- first samples after the FIFO start (chapters 9 and 10): the first debug
+  run shows a z turn of several degrees accumulated in the first five
+  seconds with the tag believed at rest. Unverified whether the tag was
+  moved or the gyro delivers settling samples after the rate is set;
+  repeat with the tag untouched and, if it reproduces, discard the
+  settling samples before they reach the sinks.
+- magnetometer axes (chapter 10 task 8): `mag_poll.c` passes the LIS2MDL
+  axes through as the driver reports them. Their alignment with the
+  LSM6DSV16X axes on the board is unverified; do the bench check and add
+  the remap in `mag_poll_fn()` if the pattern differs.
+- magnetometer stuck threshold (chapter 10): 20 identical polls mark the
+  sample invalid, because the upstream driver returns 0 after a failed
+  I2C transfer. The threshold is a choice; revisit after bench time.
+- calibration commands (chapter 12): `imu_cal_gyro_start()`,
+  `imu_cal_mag_start()`, `imu_cal_mag_finish()`, the two save functions
+  and `app_config_set_fusion()` with `fusion_sink_config_changed()` have
+  no caller until the command path exists. The bench check of chapter 10
+  uses temporary calls.
+- calibration model (later): the magnetometer fit is diagonal (hard iron
+  plus per-axis scale, no cross-axis terms) and the accelerometer is not
+  calibrated. Revisit if the measured tilt or heading error asks for it.
+- sensor-side fusion (later): the LSM6DSV16X game rotation vector (SFLP)
+  is an option for a low-power posture mode; not used, because it has no
+  magnetometer input in the HAL, cannot run on the host and costs FIFO
+  rows.
 - long FIFO burst check (chapter 9): `imu_ext` uses its own SPI bus
   functions with a 16-bit length (chapter 8, ADR-004). Prove on the bench
   that a burst above 36 rows arrives complete and record the entry.
@@ -72,11 +106,15 @@ section "Release blockers".
   tested). Open: the accumulator restarts its window on it (review F3),
   and the caller of `imu_ext_set_odr()` marks the stream once the command
   path exists (chapter 12).
-- watermark unit (chapter 9): the code treats the watermark as rows, two
-  per sample, as the sensor binding says. The burst time anchor depends
-  on it. Confirm on the bench, then replace `CLAUDE.md` rule 10.
-- `burst_proc` stack (chapter 9): raised to 2048 bytes for the decoder
-  and the sinks without a measurement; size it with the thread analyzer.
+- watermark unit (chapters 9 and 18): confirmed on the bench, the
+  watermark counts rows, two per sample (`M-09-0`); `CLAUDE.md` rule 10
+  states it. Open: `docs/adr/ADR-001.md` does not exist yet; when it is
+  written (chapter 18) it takes the unit and the measured burst period
+  from `M-09-0`.
+- `burst_proc` stack (chapters 9 and 10): raised to 2048 bytes for the
+  decoder and the sinks without a measurement; the fusion sink adds the
+  float locals of the 9-axis step and the FPU frame. Size it with the
+  thread analyzer after 9-axis fusion at 960 Hz.
 
 ## Pre-publication checks
 
