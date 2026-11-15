@@ -46,17 +46,55 @@ section "Release blockers".
   flash and shrank both image slots by one page each. Expected, and the
   reason the map must be frozen in `firmware/pm_static.yml` before any
   release (release blocker above).
-- sample rate against nominal (chapters 9 and 10): the first debug run on
-  the prototype delivers fewer samples per second than the configured
-  rate, while the filter takes dt as `1 / imu_odr_hz`. Record the figure
-  as `M-09-8`, then decide: accept the angle error, or correct dt with a
-  measured rate. Take `M-09-8` before the gyro scale check `M-10-2`.
-- first samples after the FIFO start (chapters 9 and 10): the first debug
-  run shows a z turn of several degrees accumulated in the first five
-  seconds with the tag believed at rest. Unverified whether the tag was
-  moved or the gyro delivers settling samples after the rate is set;
-  repeat with the tag untouched and, if it reproduces, discard the
-  settling samples before they reach the sinks.
+- sample rate against nominal (chapters 9 and 10): decided. The sensor
+  delivers fewer samples per second than the configured rate, and its
+  rate calibration register agrees with the counted rate on the
+  prototype. `imu_ext_rate_mhz()` returns the corrected rate; the fusion
+  time step and the decoder's timestamp period use it, and `CLAUDE.md`
+  rule 9 says so. Open: the 600 s run of `M-09-8` as its own entry, then
+  the gyro scale check `M-10-2`; chapters 11 and 12 must take their
+  frequency axis and any rate they report from the same function.
+- first samples after the FIFO start (chapters 9 and 10): decided. Two
+  runs with the tag untouched show a z turn from the first samples after
+  the sensor leaves power-down; a rate change while running shows none.
+  `imu_fifo.c` drops the samples of the settling time after the FIFO
+  start and marks the first sample that passes as a discontinuity.
+  Confirmed on the prototype: with the discard the z turn in the first
+  stats line is the bias drift only. The settling time is still a
+  choice, not a datasheet figure; it can only be shortened by a
+  measurement.
+- filter start (chapter 10): decided. The filter no longer starts at the
+  identity: the first sample after boot or a reset sets tilt from the
+  accelerometer and heading from the magnetometer (`madgwick_align()`,
+  host tested), because converging from the identity took about 15 s
+  and tilted the estimate on the way. If no usable field exists at that
+  moment, the heading is set by the first step that has one. Open: an
+  alignment taken while the tag accelerates has a wrong tilt until the
+  correction removes it; accept, or wait for a quiet sample, after bench
+  time.
+- longest filter step (chapter 10): the longest step is several times
+  the typical one, above the budget of R2, while the typical step is
+  unchanged. It shows in every stats interval at 960 Hz and now and then
+  at 240 Hz, so it is not the INT1 handler, which cannot fire during a
+  burst pass at 240 Hz. Unverified: an interrupt landing inside the
+  step, with the kernel timer or the I2C transfer of the magnetometer
+  poll as candidates. Find which, then decide whether R2 is stated for
+  the typical or the longest step.
+- cost of the corrected rate (chapters 9 and 10): after the change to a
+  rate in millihertz the typical burst pass and the typical filter step
+  are slightly longer on the prototype. The 64-bit division per sample
+  in the decoder was suspected and removed (one division per burst
+  now); the bench run shows that it was only a small part of the
+  increase. The rest is unexplained. The stats line now splits a burst
+  pass into the FIFO read and the rest; find the largest part from that
+  before optimising further.
+- step timing reads zero (chapters 9 and 10): resolved as an instrument
+  effect. Reconnecting the RTT viewer in mid-run froze the cycle counter
+  for seconds: the zero counter jumped and the other DWT lines read 0.
+  The block of zeros early after boot is the viewer attaching. Rule for
+  every DWT entry in `docs/MEASUREMENTS.md`: probe connected before the
+  reset and left alone; zero readings are counted and kept out of the
+  figures.
 - magnetometer axes (chapter 10 task 8): `mag_poll.c` passes the LIS2MDL
   axes through as the driver reports them. Their alignment with the
   LSM6DSV16X axes on the board is unverified; do the bench check and add
