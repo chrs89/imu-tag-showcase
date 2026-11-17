@@ -127,6 +127,11 @@ static void bench_fn(struct k_work *work)
         } else if (step == 1) {
                 rc = imu_cal_mag_finish();
                 LOG_INF("bench: mag finish rc %d", rc);
+                if (rc == 0) {
+                        /* New values move the field direction: align again
+                         * instead of converging to the new heading. */
+                        orientation_service_request_reset();
+                }
                 rc = imu_cal_mag_save();
                 LOG_INF("bench: mag save rc %d; put the tag down, gyro run in 10 s", rc);
                 next_s = 10;
