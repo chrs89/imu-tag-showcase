@@ -95,10 +95,33 @@ section "Release blockers".
   every DWT entry in `docs/MEASUREMENTS.md`: probe connected before the
   reset and left alone; zero readings are counted and kept out of the
   figures.
+- re-alignment after a magnetometer calibration (chapters 10 and 12):
+  new calibration values change the field direction the filter sees. On
+  the prototype the heading then moved by about 155 degrees at the
+  correction rate, with the tilt disturbed on the way. The caller of
+  `imu_cal_mag_finish()` must call `orientation_service_request_reset()`
+  when the fit succeeded. The bench hook does; the command handler of
+  chapter 12 must do the same.
+- magnetometer calibration quality (chapter 10 task 8): the first run
+  gave scales that differ strongly between the axes, which points at
+  orientations that were not covered in the 30 s. Acceptance check still
+  owed: with the calibration applied, the field magnitude in the stats
+  line stays constant while the tag is turned. Decide after that whether
+  the run needs a coverage check or a longer time.
 - magnetometer axes (chapter 10 task 8): `mag_poll.c` passes the LIS2MDL
   axes through as the driver reports them. Their alignment with the
   LSM6DSV16X axes on the board is unverified; do the bench check and add
-  the remap in `mag_poll_fn()` if the pattern differs.
+  the remap in `mag_poll_fn()` if the pattern differs. Second run: x and
+  z have the expected sign in every pose; y rose with +y up where it
+  should fall, so y is probably inverted. One pose only; the pair +y up
+  and -y up is still owed.
+- calibration over BLE only (chapters 10 and 12): the six-face run and
+  the axes check cannot be done on the flash test bench, and the tag in
+  its enclosure has no debug port. Both wait for the command path of
+  chapter 12. That path must also report the result over BLE: the return
+  code, bias and scale per axis, and the field magnitude, so that a
+  one-sided run shows without a log. Until then the stored magnetometer
+  values are from a one-sided run and the 9-axis heading is not valid.
 - magnetometer stuck threshold (chapter 10): 20 identical polls mark the
   sample invalid, because the upstream driver returns 0 after a failed
   I2C transfer. The threshold is a choice; revisit after bench time.
