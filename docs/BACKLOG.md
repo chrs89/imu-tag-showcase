@@ -172,6 +172,25 @@ section "Release blockers".
   states it. Open: `docs/adr/ADR-001.md` does not exist yet; when it is
   written (chapter 18) it takes the unit and the measured burst period
   from `M-09-0`.
+- sensor low-pass before the spectrum (chapter 11): decided, no signal
+  filter on the MCU before the FFT. Open: `imu_ext` sets the
+  accelerometer low-pass stage of the LSM6DSV16X explicitly
+  (`lsm6dsv16x_filt_xl_lp2_set()`,
+  `lsm6dsv16x_filt_xl_lp2_bandwidth_set()`); today nothing sets it and
+  the reset value applies. From the datasheet (DS13510 Rev 4, Table 69):
+  bandwidth is half the output rate with the second stage off, and a
+  quarter down to 1/800 of it in eight steps with it on. The datasheet
+  gives no attenuation at half the output rate. Proposed: leave the
+  second stage off, declare the spectrum reliable up to a quarter of the
+  output rate and indicative above, choose the output rate at four times
+  the highest frequency of interest. Owed: the owner's decision, the
+  statement in chapter 11 and the README, and a measurement with a known
+  tone above half the output rate.
+- live stream ceiling (chapter 12): proposed, the app sets a stream rate
+  in Hz, the firmware derives the downsample factor from the sensor rate
+  and clamps to a ceiling; the sink sends the mean of each group of
+  samples. Default and ceiling come from the link measurements of
+  chapter 12. Owed: the owner's confirmation and the command format.
 - `burst_proc` stack (chapters 9 and 10): raised to 2048 bytes for the
   decoder and the sinks without a measurement; the fusion sink adds the
   float locals of the 9-axis step and the FPU frame. Size it with the
@@ -199,6 +218,13 @@ must print nothing.
   current design, own HAL context behind one owner (ADR-004), is the common
   product choice and stays; what matters for review is the clean,
   documented and measured boundary. Revisit after the first FOTA release.
+- raw record to the QSPI flash (not now): a recorder sink writes
+  full-rate samples to the external flash and the tag sends saved
+  records over BLE afterwards, complete and at the pace of the link. It
+  replaces any wish to stream every sample live. The sink contract
+  (`CLAUDE.md` rule 3) forbids a flash write on the acquisition thread,
+  so the sink only copies into a buffer and a worker writes. Needs the
+  QSPI driver, which is off today (chapter 14 item above).
 
 ## Closed
 
